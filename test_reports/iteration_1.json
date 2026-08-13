@@ -1,0 +1,37 @@
+{
+  "summary": "Backend: 31/31 pytest cases PASS covering auth (dev-login, me, logout, bad secret), stores CRUD + RBAC, products CRUD + sort (recent/name/price_asc), lojista cross-store 403, AI import (Gemini gemini-3-flash-preview returned correct price ~R$8.90 for tomate), upload+files via Emergent Object Storage, orders create/get/edit-items(total recompute)/status/PDF (application/pdf, %PDF header) + public token access, admin metrics/users/role assignment. Frontend: Login screen renders correctly with dev-login toggle, role chips, email field, and submit button (all testIDs present). CRITICAL BUG: after successful POST /api/auth/dev-login (verified 200 in network), the Login screen does NOT navigate to the role-specific route — user stays stuck on /login. This blocks all frontend role flows (customer marketplace, cart/checkout, vendor catalog+AI, admin FAB/users/metrics). Root cause: login.tsx never triggers navigation on user context change; redirects are wired only in app/index.tsx (Redirect based on user.role) but login screen has no router.replace('/') after login. Deprecated packages/APIs: expo-av not detected in deps; RN warning 'shadow* style props are deprecated. Use boxShadow.' emitted from theme (non-blocking, cosmetic).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "app/login.tsx", "issue": "After successful devLogin (and by symmetry loginGoogle), the screen never redirects — user state is set in context but Login has no useEffect to router.replace('/'). Only /index.tsx contains the role router, but users don't reach it. Blocks all authed flows.", "testID": "dev-login-button", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [
+      {"flow": "dev-login -> role home", "issue": "Backend returns 200 with session_token+user; frontend stores it but does not navigate away from /login.", "affected_testIDs": ["dev-login-button", "google-signin-button"]}
+    ],
+    "design_issues": [
+      {"screen": "global", "issues": ["RN web warning: 'shadow*' style props are deprecated — theme.ts uses shadow{Offset,Opacity,Radius,Color}. Migrate to boxShadow for RN Web."]}
+    ],
+    "react_native_issues": [
+      {"component": "src/theme.ts (shadow.*)", "issue": "Deprecated shadow* style props. Use boxShadow on RN Web / update helper. Reference: console warning emitted on every screen."}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_feira_backend.py", "/app/backend/tests/conftest.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix login redirect: in /app/frontend/app/login.tsx, add `const router = useRouter(); const { user } = useAuth(); useEffect(() => { if (user) router.replace('/'); }, [user]);` so successful dev-login and Google-login route to the correct role stack.",
+    "Alternatively, call `router.replace('/')` at the end of handleDev/handleGoogle after devLogin/loginGoogle resolve.",
+    "Consider migrating shadow* styles in src/theme.ts to boxShadow to silence RN Web deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "server.py exceeds ~620 lines — consider splitting into routes/{auth,stores,products,orders,admin}.py and services/{ai,storage,pdf}.py.",
+    "Order status editable=True only when status in ('novo','editando') — verified working; document allowed statuses (novo, confirmado, editando, pronto, entregue, cancelado?) as an Enum for validation.",
+    "get_current_user parses ISO expires_at but sessions are inserted as datetime; ok. TTL index on expires_at is created — good.",
+    "AI import RBAC OK; JSON extraction uses regex fallback — good defensive parsing."
+  ],
+  "updated_files": ["/app/backend/tests/test_feira_backend.py", "/app/backend/tests/conftest.py"],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "partial — login screen renders but authed flows blocked by redirect bug"},
+  "seed_data_creation": "Created test store 'TEST_Barraca_Verde_2', products (TEST_Banana, TEST_Abacaxi), and a test order via automated tests. Users test_admin/test_lojista/test_cliente@feira.test persisted (lowercased by backend).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend fully green via /app/backend/tests/test_feira_backend.py (run with `-n 0` to disable xdist parallelism because tests share module STATE). To test frontend flows end-to-end, first FIX login redirect (see action_items), then re-run Playwright with viewport 390x844: click dev-login-toggle -> dev-role-<role> -> dev-login-button -> assert URL changes / target testIDs appear (customer: store-card-*, vendor: add-product-fab / ai-process-button, admin: add-store-fab).",
+  "rca_of_issue": "Reproduce: open https://bazaar-app-85.preview.emergentagent.com, click 'Entrar como teste (dev)', pick any role, click 'Entrar (teste)'. Network shows POST /api/auth/dev-login -> 200, response contains session_token+user, AsyncStorage receives token, AuthProvider setUser() runs — but the login screen has no side effect to navigate. app/index.tsx contains the role Redirect but is not the currently mounted route. Fix: add router.replace('/') after devLogin/loginGoogle success OR add useEffect(() => { if (user) router.replace('/'); }, [user]) on login.tsx."
+}

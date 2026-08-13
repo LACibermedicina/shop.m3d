@@ -1,0 +1,200 @@
+{
+  "app_name": "Feira Online",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A clean, highly usable iOS-native interface grounded in warm, earthy tones and botanical greens to evoke a fresh, trustworthy farmers market.",
+  "color": {
+    "surface": "#FDFBF7",
+    "onSurface": "#1A1C19",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1A1C19",
+    "surfaceTertiary": "#F4F0EA",
+    "onSurfaceTertiary": "#4A4C48",
+    "surfaceInverse": "#2E312D",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#4A7C59",
+    "brandPrimary": "#4A7C59",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#C16E53",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#E9F0EC",
+    "onBrandTertiary": "#2E513A",
+    "success": "#3A6B4C",
+    "onSuccess": "#FFFFFF",
+    "warning": "#D48C46",
+    "onWarning": "#FFFFFF",
+    "error": "#B34D4D",
+    "onError": "#FFFFFF",
+    "info": "#4A7C59",
+    "onInfo": "#FFFFFF",
+    "border": "#E8E3DB",
+    "borderStrong": "#D1C9BE",
+    "divider": "#F0ECE5",
+    "surfaceDark": "#1A1C19",
+    "onSurfaceDark": "#FDFBF7",
+    "surfaceSecondaryDark": "#232622",
+    "onSurfaceSecondaryDark": "#FDFBF7",
+    "brandPrimaryDark": "#5B936C",
+    "onBrandPrimaryDark": "#1A1C19"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous, comfortable vertical rhythms. Cards are never flush to the screen edge (always at least md margin). Use Safe Area meticulously.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Bottom tab bar",
+      "Sticky headers over scrolling product grids",
+      "Floating Action Buttons (Admin/Vendor)",
+      "Sticky primary CTA container at the bottom of the cart screen"
+    ],
+    "dont's": [
+      "Body content cards",
+      "Form inputs",
+      "Dense order list items"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Auth / Role Selection",
+      "purpose": "Secure Google login and routing users to their specific role experience.",
+      "states": {
+        "loading": "Centered brand spinner.",
+        "empty": "N/A",
+        "error": "Toast or modal with retry option."
+      },
+      "layout": "Full-bleed hero image of fresh produce at the top with a vertical gradient scrim (transparent to surface). White surface card at the bottom half containing the app logo (text), welcome message, and a prominent Google Sign-In button."
+    },
+    {
+      "name": "Customer - Home (Marketplace)",
+      "purpose": "Discover stores (barracas) via a clean, image-led grid.",
+      "states": {
+        "loading": "Skeleton grid.",
+        "empty": "Illustration of an empty basket + 'Nenhuma barraca disponível ainda'.",
+        "error": "Error text + retry button."
+      },
+      "layout": "Sticky glass header with Search bar. 2-column grid of store cards. Each card has a cover image (border-top-radius), logo badge overlapping the edge, and store name/info below. Use flexWrap with space-between and exact width math."
+    },
+    {
+      "name": "Customer - Store Catalog",
+      "purpose": "Browse and add specific vendor products to the bag.",
+      "states": {
+        "loading": "Skeleton grid.",
+        "empty": "Illustration + 'Esta barraca ainda não tem produtos'.",
+        "error": "Error text + retry button."
+      },
+      "layout": "Parallax hero header with vendor cover photo + gradient scrim + logo/name. Scrollable 2-column product grid below. Each product card has a real image, title, price, and a minimal 'Add' button. Sticky glass CTA at bottom if cart is not empty."
+    },
+    {
+      "name": "Customer - Cart & Checkout",
+      "purpose": "Review items grouped by vendor and generate WhatsApp PDF order.",
+      "states": {
+        "loading": "Spinner.",
+        "empty": "Empty grocery bag image + 'Sua sacola está vazia'.",
+        "error": "Error text + retry button."
+      },
+      "layout": "List grouped by vendor. Vendor name as section header. Items with qty controls. Subtotals clearly visible. Pinned sticky primary CTA at the bottom ('Finalizar Pedido') wrapped in a glass container to allow scrolling underneath."
+    },
+    {
+      "name": "Vendor - Dashboard & Orders",
+      "purpose": "Manage incoming orders quickly with clear action buttons.",
+      "states": {
+        "loading": "Skeleton list.",
+        "empty": "Farmer packing box image + 'Nenhum pedido no momento'.",
+        "error": "Error text + retry button."
+      },
+      "layout": "Top metric row (active orders, revenue). Vertical list of order cards. Cards clearly show Order ID, Status, Items, Total, and full-width primary actions (e.g., 'Marcar como Pronto'). High contrast for fast scanning."
+    },
+    {
+      "name": "Vendor - Catalog Management",
+      "purpose": "Add products via WhatsApp text/image AI parsing or manual entry.",
+      "states": {
+        "loading": "Spinner.",
+        "empty": "Illustration + 'Comece a adicionar seus produtos'.",
+        "error": "Error text + retry button."
+      },
+      "layout": "Top section: AI import card (Input field for WhatsApp message paste + 'Processar' button). Bottom section: List of current products with edit/delete icons. Uses brandTertiary icon containers for actions."
+    },
+    {
+      "name": "Admin - Store Management",
+      "purpose": "Global overview and CRUD operations for market vendors.",
+      "states": {
+        "loading": "Skeleton list.",
+        "empty": "Illustration + 'Nenhuma loja cadastrada'.",
+        "error": "Error text + retry button."
+      },
+      "layout": "List of stores with their status and contact info. Floating Action Button (glass effect over brandPrimary) in the bottom right to add a new store."
+    }
+  ],
+  "images": {
+    "customer_hero": {
+      "url": "https://images.unsplash.com/photo-1485637701894-09ad422f6de6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwxfHxmYXJtZXJzJTIwbWFya2V0JTIwZnJlc2glMjBwcm9kdWNlfGVufDB8fHx8MTc4NjYzODM0NHww&ixlib=rb-4.1.0&q=85",
+      "dark": "https://images.unsplash.com/photo-1567306295427-94503f8300d7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwyfHxmYXJtZXJzJTIwbWFya2V0JTIwZnJlc2glMjBwcm9kdWNlfGVufDB8fHx8MTc4NjYzODM0NHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Fresh produce baskets"
+    },
+    "vendor_empty_orders": {
+      "url": "https://images.unsplash.com/photo-1626906722170-13ec7bb0b7f3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTJ8MHwxfHNlYXJjaHwxfHxmYXJtZXIlMjBwYWNraW5nJTIwYm94fGVufDB8fHx8MTc4NjYzODM0NHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Farmer packing box in the field"
+    },
+    "customer_empty_cart": {
+      "url": "https://images.unsplash.com/photo-1544816155-12df9643f363?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMGdyb2NlcnklMjBiYWd8ZW58MHx8fHwxNzg2NjM4MzQ0fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Empty eco-friendly grocery bag"
+    },
+    "general_vegetables": {
+      "url": "https://images.unsplash.com/photo-1659822887922-c1386185cc6b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMHZlZ2V0YWJsZXMlMjBiYXNrZXR8ZW58MHx8fHwxNzg2NjM4MzQ0fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Fresh vegetable basket"
+    }
+  },
+  "haptics": {
+    "button_press": "light",
+    "add_to_cart": "medium",
+    "tab_switch": "light",
+    "order_action_success": "success"
+  },
+  "instructions_to_main_agent": [
+    "Ensure distinct navigation stacks for the three roles (Admin, Lojista/Vendor, Cliente/Customer) right after Google Auth resolves.",
+    "Implement the 'Gradient-to-dark Scrim Pattern' on the Customer Store Catalog header and the Auth Hero image to guarantee text readability.",
+    "Use standard Phosphor icons with consistent weights (e.g., regular/outlined) across the app, avoiding emoji altogether in system UI.",
+    "For the Vendor Dashboard, prioritize clear, highly visible action buttons on order cards ('Aceitar', 'Pronto') to support fast mobile workflows as per research.",
+    "For Customer Cart, group items clearly by Vendor with subtotals before the grand total, and pin the 'Finalizar Pedido' CTA to the bottom using a glass container.",
+    "Handle images robustly: always apply `expo-image` with contentFit='cover' for banners and use initials avatars (with `brandTertiary` bg) ONLY as fallbacks if store/user logos are missing."
+  ]
+}
