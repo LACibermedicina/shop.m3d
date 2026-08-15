@@ -134,6 +134,13 @@ export default function Marketplace() {
           contentFit="cover"
           transition={200}
         />
+        <View
+          testID={`store-status-${item.id}`}
+          style={[styles.statusPill, { backgroundColor: item.online ? "rgba(58,107,76,0.92)" : "rgba(60,62,58,0.8)" }]}
+        >
+          <View style={[styles.statusDot, { backgroundColor: item.online ? "#8FE3B0" : "#C9C9C4" }]} />
+          <Text style={styles.statusText}>{item.online ? "Aberta" : "Fechada"}</Text>
+        </View>
         <Pressable
           testID={`fav-toggle-${item.id}`}
           onPress={() => toggleFav(item.id)}
@@ -476,6 +483,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  statusPill: {
+    position: "absolute",
+    top: spacing.sm,
+    left: spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   cardBody: { padding: spacing.md, paddingTop: spacing.xl },
   cardName: { fontSize: font.lg, fontWeight: "700", color: colors.onSurface },
   cardMeta: { fontSize: font.sm, color: colors.onSurfaceTertiary, marginTop: 2 },

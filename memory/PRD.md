@@ -44,8 +44,14 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 - **Avaliações de Loja**: coleção reviews (1 por usuário/loja, upsert); POST/GET /api/stores/{id}/reviews; média (avg_rating/review_count) exibida em cards, home, busca e hero; modal de avaliação com estrelas + comentário.
 - **Relatório de Vendas (lojista)**: nova aba "Vendas" com cards (total, pedidos, ticket médio) e gráficos de barras (faturamento por dia — 7 dias; por semana — 4 semanas). GET /api/vendor/report.
 
+### Iteração 4 (2026-08-15) — presença + cupons
+- **Loja aberta/fechada (presença em tempo real)**: campos is_open/last_seen na loja; PUT /api/vendor/store/open (toggle) + POST /api/vendor/heartbeat (a cada 25s enquanto app ativo, via VendorOrdersProvider). `online` = is_open && heartbeat < 60s. Selo verde "Aberta"/cinza "Fechada" nos cards da home, favoritos, destaques e no hero da loja. Toggle no topo da tela Pedidos do lojista.
+- **Cupons de desconto**: coleção coupons (código único por loja, percent/fixed). POST /api/coupons, GET /api/vendor/coupons, DELETE /api/coupons/{id}, POST /api/coupons/apply. Lojista cria/gerencia via modal na tela Pedidos. Cliente aplica cupom por loja no carrinho (desconto + total recalculados). create_order aplica cupom (subtotal/discount/coupon_code/total); PDF e tela de pedido mostram desconto.
+
 ## Backlog
 - P1: Ativar WhatsApp Cloud API quando o usuário fornecer credenciais (código pronto, dormente).
+- P2: Filtro de categoria também na home; ordenação por avaliação; validade/limite de uso nos cupons.
+- P2: Desabilitar dev-login em produção (EXPO_PUBLIC_ENABLE_DEV_LOGIN=false).
 - P2: Filtro de categoria também na home; ordenação por avaliação; favoritos offline.
 - P2: Desabilitar dev-login em produção (EXPO_PUBLIC_ENABLE_DEV_LOGIN=false).
 

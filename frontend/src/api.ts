@@ -114,6 +114,14 @@ export const api = {
   addFavorite: (storeId: string) => apiRequest(`/favorites/${storeId}`, { method: "POST" }),
   removeFavorite: (storeId: string) => apiRequest(`/favorites/${storeId}`, { method: "DELETE" }),
   vendorReport: () => apiRequest("/vendor/report"),
+  setStoreOpen: (isOpen: boolean) =>
+    apiRequest("/vendor/store/open", { method: "PUT", body: { is_open: isOpen } }),
+  heartbeat: () => apiRequest("/vendor/heartbeat", { method: "POST" }),
+  createCoupon: (b: any) => apiRequest("/coupons", { method: "POST", body: b }),
+  vendorCoupons: () => apiRequest("/vendor/coupons"),
+  deleteCoupon: (id: string) => apiRequest(`/coupons/${id}`, { method: "DELETE" }),
+  applyCoupon: (storeId: string, code: string, subtotal: number) =>
+    apiRequest("/coupons/apply", { method: "POST", body: { store_id: storeId, code, subtotal } }),
   createProduct: (b: any) => apiRequest("/products", { method: "POST", body: b }),
   updateProduct: (id: string, b: any) => apiRequest(`/products/${id}`, { method: "PUT", body: b }),
   deleteProduct: (id: string) => apiRequest(`/products/${id}`, { method: "DELETE" }),

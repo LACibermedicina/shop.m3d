@@ -154,8 +154,13 @@ export default function OrderDetail() {
           ))}
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>{money(total)}</Text>
+            <Text style={styles.totalValue}>{money(order.discount ? Math.max(total - order.discount, 0) : total)}</Text>
           </View>
+          {!!order.discount && (
+            <Text style={styles.couponNote}>
+              Inclui desconto do cupom {order.coupon_code} (-{money(order.discount)})
+            </Text>
+          )}
         </View>
 
         {canEdit && dirty && (
@@ -245,6 +250,7 @@ const styles = StyleSheet.create({
   },
   totalLabel: { fontSize: font.lg, color: colors.onSurfaceTertiary },
   totalValue: { fontSize: font.xl, fontWeight: "800", color: colors.brandPrimary },
+  couponNote: { fontSize: font.sm, color: colors.success, marginTop: spacing.xs, fontWeight: "600" },
   statusRow: { gap: spacing.sm, paddingBottom: spacing.md },
   statusChip: {
     height: 40,

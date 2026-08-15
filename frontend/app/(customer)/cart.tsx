@@ -8,6 +8,7 @@ import {
   Modal,
   Linking,
   Platform,
+  TextInput,
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -36,6 +37,45 @@ export default function Cart() {
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<CreatedOrder[] | null>(null);
   const [waConfigured, setWaConfigured] = useState(false);
+  const [couponInput, setCouponInput] = useState<Record<string, string>>({});
+  const [applied, setApplied] = useState<Record<string, { code: string; discount: number }>>({});
+  const [applying, setApplying] = useState<string>("");
+
+  const applyCoupon = async (storeId: string, subtotal: number) => {
+    const code = (couponInput[storeId] || "").trim();
+    if (!code) return;
+    setApplying(storeId);
+    try {
+      const r = await api.applyCoupon(storeId, code, subtotal);
+      if (r.valid) {
+        setApplied((p) => ({ ...p, [storeId]: { code: r.code, discount: r.discount } }));
+        toast(`Cupom aplicado: -${money(r.discount)}`, "success");
+      } else {
+        setApplied((p) => {
+          const n = { ...p };
+          delete n[storeId];
+          return n;
+        });
+        toast("Cupom inválido", "error");
+      }
+    } catch {
+      toast("Falha ao validar cupom", "error");
+    } finally {
+      setApplying("");
+    }
+  };
+
+  const removeCoupon = (storeId: string) => {
+    setApplied((p) => {
+      const n = { ...p };
+      delete n[storeId];
+      return n;
+    });
+    setCouponInput((p) => ({ ...p, [storeId]: "" }));
+  };
+
+  const totalDiscount = Object.values(applied).reduce((a, c) => a + c.discount, 0);
+  const grandTotal = Math.max(total - totalDiscount, 0);
 
   useEffect(() => {
     api.whatsappStatus().then((r) => setWaConfigured(!!r.configured)).catch(() => {});
@@ -83,6 +123,7 @@ export default function Cart() {
             price: i.price,
             qty: i.qty,
           })),
+          coupon_code: applied[storeId]?.code || "",
         });
         results.push({
           id: order.id,
@@ -175,15 +216,52 @@ export default function Cart() {
                 <Text style={styles.subLabel}>Subtotal</Text>
                 <Text style={styles.subValue}>{money(sub)}</Text>
               </View>
+              {applied[storeId] ? (
+                <View style={styles.couponApplied} testID={`coupon-applied-${storeId}`}>
+                  <Ionicons name="pricetag" size={14} color={colors.success} />
+                  <Text style={styles.couponAppliedText}>
+                    {applied[storeId].code} — desconto {money(applied[storeId].discount)}
+                  </Text>
+                  <Pressable testID={`coupon-remove-${storeId}`} onPress={() => removeCoupon(storeId)}>
+                    <Ionicons name="close-circle" size={18} color={colors.muted} />
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.couponRow}>
+                  <TextInput
+                    testID={`coupon-input-${storeId}`}
+                    value={couponInput[storeId] || ""}
+                    onChangeText={(t) => setCouponInput((p) => ({ ...p, [storeId]: t }))}
+                    placeholder="Cupom de desconto"
+                    placeholderTextColor={colors.muted}
+                    autoCapitalize="characters"
+                    style={styles.couponInput}
+                  />
+                  <Pressable
+                    testID={`coupon-apply-${storeId}`}
+                    onPress={() => applyCoupon(storeId, sub)}
+                    style={styles.couponApply}
+                    disabled={applying === storeId}
+                  >
+                    <Text style={styles.couponApplyText}>{applying === storeId ? "..." : "Aplicar"}</Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
           );
         })}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+        {totalDiscount > 0 && (
+          <View style={styles.discountRow}>
+            <Text style={styles.discountLabel}>Descontos</Text>
+            <Text style={styles.discountValue}>- {money(totalDiscount)}</Text>
+          </View>
+        )}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Total</Text>
-          <Text style={styles.totalValue}>{money(total)}</Text>
+          <Text style={styles.totalValue}>{money(grandTotal)}</Text>
         </View>
         <Button
           title="Finalizar Pedido"
@@ -284,6 +362,40 @@ const styles = StyleSheet.create({
   },
   subLabel: { fontSize: font.base, color: colors.onSurfaceTertiary },
   subValue: { fontSize: font.base, fontWeight: "700", color: colors.onSurface },
+  couponRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  couponInput: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    color: colors.onSurface,
+    fontSize: font.base,
+    backgroundColor: colors.surface,
+  },
+  couponApply: {
+    paddingHorizontal: spacing.lg,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  couponApplyText: { color: colors.onBrandTertiary, fontWeight: "800", fontSize: font.base },
+  couponApplied: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  couponAppliedText: { flex: 1, fontSize: font.base, fontWeight: "700", color: colors.onBrandTertiary },
+  discountRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.xs },
+  discountLabel: { fontSize: font.base, color: colors.success },
+  discountValue: { fontSize: font.base, fontWeight: "700", color: colors.success },
   footer: {
     position: "absolute",
     bottom: 0,

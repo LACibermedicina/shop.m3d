@@ -41,6 +41,7 @@ META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
 WA_API_VERSION = os.environ.get("WA_API_VERSION", "v25.0").strip()
 WA_CONFIGURED = bool(WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID)
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
+ONLINE_WINDOW = 60  # segundos sem heartbeat até a loja ser considerada offline
 
 # ------------------------------------------------------------------ Storage
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
@@ -151,6 +152,24 @@ class OrderIn(BaseModel):
     items: List[OrderItem]
     customer_name: Optional[str] = ""
     notes: Optional[str] = ""
+    coupon_code: Optional[str] = ""
+
+
+class StoreOpen(BaseModel):
+    is_open: bool
+
+
+class CouponIn(BaseModel):
+    store_id: str
+    code: str
+    type: str = "percent"  # "percent" | "fixed"
+    value: float
+
+
+class CouponApply(BaseModel):
+    store_id: str
+    code: str
+    subtotal: float
 
 
 class OrderItemsUpdate(BaseModel):
@@ -289,6 +308,21 @@ async def files(path: str):
 
 
 # ------------------------------------------------------------------ Stores
+def store_online(s: dict) -> bool:
+    if not s.get("is_open"):
+        return False
+    ls = s.get("last_seen")
+    if not ls:
+        return False
+    try:
+        t = datetime.fromisoformat(ls)
+    except Exception:
+        return False
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - t).total_seconds() < ONLINE_WINDOW
+
+
 async def rating_summary(store_id: str):
     revs = await db.reviews.find({"store_id": store_id}, {"_id": 0, "rating": 1}).to_list(2000)
     if not revs:
@@ -302,6 +336,7 @@ async def list_stores():
     stores = await db.stores.find({"deleted": {"$ne": True}, "active": {"$ne": False}}, {"_id": 0}).to_list(500)
     for s in stores:
         s["product_count"] = await db.products.count_documents({"store_id": s["id"], "deleted": {"$ne": True}})
+        s["online"] = store_online(s)
         s.update(await rating_summary(s["id"]))
     return stores
 
@@ -311,6 +346,7 @@ async def get_store(store_id: str):
     s = await db.stores.find_one({"id": store_id, "deleted": {"$ne": True}}, {"_id": 0})
     if not s:
         raise HTTPException(status_code=404, detail="Loja não encontrada")
+    s["online"] = store_online(s)
     s.update(await rating_summary(store_id))
     return s
 
@@ -318,7 +354,8 @@ async def get_store(store_id: str):
 @api.post("/stores")
 async def create_store(body: StoreIn, user=Depends(require_role("admin"))):
     doc = body.dict()
-    doc.update({"id": new_id("store"), "active": True, "deleted": False, "created_at": now_iso()})
+    doc.update({"id": new_id("store"), "active": True, "deleted": False,
+                "is_open": False, "last_seen": None, "created_at": now_iso()})
     await db.stores.insert_one(doc)
     if doc.get("owner_user_id"):
         await db.users.update_one({"user_id": doc["owner_user_id"]},
@@ -475,13 +512,24 @@ async def create_order(body: OrderIn, user=Depends(get_current_user)):
     store = await db.stores.find_one({"id": body.store_id, "deleted": {"$ne": True}}, {"_id": 0})
     if not store:
         raise HTTPException(status_code=404, detail="Loja não encontrada")
-    total = round(sum(i.price * i.qty for i in body.items), 2)
+    subtotal = round(sum(i.price * i.qty for i in body.items), 2)
+    discount = 0.0
+    coupon_code = ""
+    if body.coupon_code:
+        coupon = await db.coupons.find_one(
+            {"store_id": body.store_id, "code": body.coupon_code.strip().upper(),
+             "active": {"$ne": False}, "deleted": {"$ne": True}}, {"_id": 0})
+        if coupon:
+            discount = calc_discount(coupon, subtotal)
+            coupon_code = coupon["code"]
+    total = round(max(subtotal - discount, 0), 2)
     doc = {
         "id": new_id("order"), "token": uuid.uuid4().hex, "store_id": body.store_id,
         "store_name": store["name"], "store_whatsapp": store["whatsapp"],
         "customer_user_id": user["user_id"],
         "customer_name": body.customer_name or user.get("name", ""),
-        "items": [i.dict() for i in body.items], "total": total, "notes": body.notes,
+        "items": [i.dict() for i in body.items], "subtotal": subtotal,
+        "discount": discount, "coupon_code": coupon_code, "total": total, "notes": body.notes,
         "status": "novo", "editable": True, "deleted": False, "created_at": now_iso(),
     }
     await db.orders.insert_one(doc)
@@ -588,6 +636,10 @@ def build_pdf(o):
     for it in o["items"]:
         data.append([it["name"], str(it["qty"]), f"R$ {it['price']:.2f}",
                      f"R$ {it['price'] * it['qty']:.2f}"])
+    if o.get("discount"):
+        data.append(["", "", "Subtotal", f"R$ {o.get('subtotal', o['total']):.2f}"])
+        cc = f" ({o.get('coupon_code')})" if o.get("coupon_code") else ""
+        data.append(["", "", f"Desconto{cc}", f"- R$ {o['discount']:.2f}"])
     data.append(["", "", "Total", f"R$ {o['total']:.2f}"])
     table = Table(data, colWidths=[80 * mm, 20 * mm, 35 * mm, 35 * mm])
     table.setStyle(TableStyle([
@@ -647,6 +699,7 @@ async def home():
         s["product_count"] = await db.products.count_documents(
             {"store_id": s["id"], "deleted": {"$ne": True}}
         )
+        s["online"] = store_online(s)
         s.update(await rating_summary(s["id"]))
     featured = [s for s in stores if s.get("featured")]
     if not featured:
@@ -674,6 +727,7 @@ async def search(q: str = Query("")):
         s["product_count"] = await db.products.count_documents(
             {"store_id": s["id"], "deleted": {"$ne": True}}
         )
+        s["online"] = store_online(s)
         s.update(await rating_summary(s["id"]))
     active_ids = await db.stores.distinct("id", {"deleted": {"$ne": True}, "active": {"$ne": False}})
     all_stores = await db.stores.find({"id": {"$in": active_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
@@ -877,6 +931,100 @@ async def vendor_report(user=Depends(require_role("lojista", "admin"))):
     return {"daily": daily, "weekly": weekly, "total": total_rev, "orders": len(orders)}
 
 
+# ------------------------------------------------------------------ Store presence (aberta/fechada)
+async def _vendor_store(user):
+    if user["role"] == "admin":
+        return None
+    if not user.get("store_id"):
+        raise HTTPException(status_code=400, detail="Nenhuma loja vinculada")
+    return user["store_id"]
+
+
+@api.put("/vendor/store/open")
+async def set_store_open(body: StoreOpen, user=Depends(require_role("lojista"))):
+    sid = user.get("store_id")
+    if not sid:
+        raise HTTPException(status_code=400, detail="Nenhuma loja vinculada")
+    updates = {"is_open": body.is_open}
+    if body.is_open:
+        updates["last_seen"] = now_iso()
+    await db.stores.update_one({"id": sid}, {"$set": updates})
+    s = await db.stores.find_one({"id": sid}, {"_id": 0})
+    s["online"] = store_online(s)
+    return s
+
+
+@api.post("/vendor/heartbeat")
+async def heartbeat(user=Depends(require_role("lojista"))):
+    sid = user.get("store_id")
+    if not sid:
+        return {"online": False}
+    await db.stores.update_one({"id": sid}, {"$set": {"last_seen": now_iso()}})
+    s = await db.stores.find_one({"id": sid}, {"_id": 0})
+    return {"online": store_online(s), "is_open": bool(s.get("is_open"))}
+
+
+# ------------------------------------------------------------------ Coupons
+def calc_discount(coupon: dict, subtotal: float) -> float:
+    if coupon.get("type") == "fixed":
+        return round(min(float(coupon.get("value", 0)), subtotal), 2)
+    return round(subtotal * float(coupon.get("value", 0)) / 100.0, 2)
+
+
+@api.post("/coupons")
+async def create_coupon(body: CouponIn, user=Depends(require_role("lojista", "admin"))):
+    if user["role"] == "lojista" and user.get("store_id") != body.store_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    if body.type not in ("percent", "fixed"):
+        raise HTTPException(status_code=400, detail="Tipo inválido")
+    if body.value <= 0:
+        raise HTTPException(status_code=400, detail="Valor deve ser maior que zero")
+    code = body.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Informe o código")
+    doc = {"id": new_id("coup"), "store_id": body.store_id, "code": code,
+           "type": body.type, "value": round(body.value, 2), "active": True,
+           "deleted": False, "created_at": now_iso()}
+    await db.coupons.update_one(
+        {"store_id": body.store_id, "code": code},
+        {"$set": doc}, upsert=True)
+    return await db.coupons.find_one({"store_id": body.store_id, "code": code}, {"_id": 0})
+
+
+@api.get("/vendor/coupons")
+async def vendor_coupons(user=Depends(require_role("lojista", "admin"))):
+    q = {"deleted": {"$ne": True}}
+    if user["role"] == "lojista":
+        if not user.get("store_id"):
+            return []
+        q["store_id"] = user["store_id"]
+    return await db.coupons.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api.delete("/coupons/{coupon_id}")
+async def delete_coupon(coupon_id: str, user=Depends(require_role("lojista", "admin"))):
+    c = await db.coupons.find_one({"id": coupon_id})
+    if not c:
+        raise HTTPException(status_code=404, detail="Cupom não encontrado")
+    if user["role"] == "lojista" and user.get("store_id") != c["store_id"]:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    await db.coupons.update_one({"id": coupon_id}, {"$set": {"deleted": True}})
+    return {"ok": True}
+
+
+@api.post("/coupons/apply")
+async def apply_coupon(body: CouponApply, user=Depends(get_current_user)):
+    coupon = await db.coupons.find_one(
+        {"store_id": body.store_id, "code": body.code.strip().upper(),
+         "active": {"$ne": False}, "deleted": {"$ne": True}}, {"_id": 0})
+    if not coupon:
+        return {"valid": False, "detail": "Cupom inválido"}
+    discount = calc_discount(coupon, body.subtotal)
+    return {"valid": True, "code": coupon["code"], "type": coupon["type"],
+            "value": coupon["value"], "discount": discount,
+            "total": round(max(body.subtotal - discount, 0), 2)}
+
+
 @api.get("/")
 async def root():
     return {"message": "Feira Online API"}
@@ -900,6 +1048,7 @@ async def startup():
         await db.orders.create_index("id", unique=True)
         await db.reviews.create_index([("store_id", 1), ("user_id", 1)], unique=True)
         await db.favorites.create_index([("user_id", 1), ("store_id", 1)], unique=True)
+        await db.coupons.create_index([("store_id", 1), ("code", 1)], unique=True)
     except Exception as e:
         logger.warning(f"index error: {e}")
     try:

@@ -236,7 +236,16 @@ export default function StoreCatalog() {
                 <Ionicons name={isFav ? "heart" : "heart-outline"} size={22} color={isFav ? colors.brandSecondary : "#fff"} />
               </Pressable>
               <View style={styles.heroInfo}>
-                <Text style={styles.heroName}>{store?.name}</Text>
+                <View style={styles.heroTitleRow}>
+                  <Text style={styles.heroName}>{store?.name}</Text>
+                  <View
+                    testID="store-hero-status"
+                    style={[styles.heroStatus, { backgroundColor: store?.online ? "rgba(58,107,76,0.95)" : "rgba(60,62,58,0.85)" }]}
+                  >
+                    <View style={[styles.statusDot, { backgroundColor: store?.online ? "#8FE3B0" : "#C9C9C4" }]} />
+                    <Text style={styles.statusText}>{store?.online ? "Aberta" : "Fechada"}</Text>
+                  </View>
+                </View>
                 <View style={{ marginTop: 4 }}>
                   <Stars value={store?.avg_rating || 0} count={store?.review_count || 0} size={13} />
                 </View>
@@ -357,6 +366,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   heroInfo: { padding: spacing.lg },
+  heroTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexWrap: "wrap" },
+  heroStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   heroName: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
   heroDesc: { fontSize: font.base, color: "rgba(255,255,255,0.9)", marginTop: 4 },
   chipRow: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
