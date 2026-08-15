@@ -94,6 +94,11 @@ export const api = {
     }),
 
   stores: () => apiRequest("/stores", { auth: false }),
+  home: () => apiRequest("/home", { auth: false }),
+  search: (q: string) => apiRequest(`/search?q=${encodeURIComponent(q)}`, { auth: false }),
+  whatsappStatus: () => apiRequest("/whatsapp/status", { auth: false }),
+  sendOrderWhatsApp: (orderId: string) =>
+    apiRequest("/orders/send-whatsapp", { method: "POST", body: { order_id: orderId } }),
   store: (id: string) => apiRequest(`/stores/${id}`, { auth: false }),
   createStore: (b: any) => apiRequest("/stores", { method: "POST", body: b }),
   updateStore: (id: string, b: any) => apiRequest(`/stores/${id}`, { method: "PUT", body: b }),

@@ -9,6 +9,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from "react-native";
 import { Image } from "expo-image";
 import { useFocusEffect } from "expo-router";
@@ -32,6 +33,7 @@ export default function AdminStores() {
   const [whats, setWhats] = useState("");
   const [logoPath, setLogoPath] = useState("");
   const [logoUri, setLogoUri] = useState("");
+  const [featured, setFeatured] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -57,6 +59,7 @@ export default function AdminStores() {
     setWhats("");
     setLogoPath("");
     setLogoUri("");
+    setFeatured(false);
     setFormOpen(true);
   };
 
@@ -67,6 +70,7 @@ export default function AdminStores() {
     setWhats(s.whatsapp || "");
     setLogoPath(s.logo || "");
     setLogoUri("");
+    setFeatured(!!s.featured);
     setFormOpen(true);
   };
 
@@ -100,7 +104,7 @@ export default function AdminStores() {
     }
     setSaving(true);
     try {
-      const body = { name, description: desc, whatsapp: whats, logo: logoPath };
+      const body = { name, description: desc, whatsapp: whats, logo: logoPath, featured };
       if (editing) await api.updateStore(editing.id, body);
       else await api.createStore(body);
       setFormOpen(false);
@@ -199,6 +203,19 @@ export default function AdminStores() {
                 placeholder="Ex: 5511999999999"
                 keyboardType="phone-pad"
               />
+              <View style={styles.switchRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.switchLabel}>Destaque na home</Text>
+                  <Text style={styles.switchHint}>Aparece na vitrine de destaques dos clientes</Text>
+                </View>
+                <Switch
+                  testID="store-featured-switch"
+                  value={featured}
+                  onValueChange={setFeatured}
+                  trackColor={{ true: colors.brandPrimary, false: colors.borderStrong }}
+                  thumbColor="#fff"
+                />
+              </View>
               <Button title="Salvar barraca" onPress={save} loading={saving} testID="save-store-button" />
             </ScrollView>
           </View>
@@ -273,4 +290,12 @@ const styles = StyleSheet.create({
   },
   logoPickInner: { width: "100%", height: "100%" },
   logoPickText: { fontSize: font.base, color: colors.brandPrimary, fontWeight: "600", marginTop: 4 },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  switchLabel: { fontSize: font.base, fontWeight: "700", color: colors.onSurface },
+  switchHint: { fontSize: font.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
 });

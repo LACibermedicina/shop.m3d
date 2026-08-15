@@ -1,41 +1,31 @@
-import { useState, useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { View, Text, StyleSheet, FlatList, Pressable, RefreshControl } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
-import { Loading, EmptyState, ErrorState, StatusBadge } from "@/src/ui";
+import { useVendorOrders } from "@/src/vendorOrders";
+import { Loading, EmptyState, StatusBadge } from "@/src/ui";
 import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
 
 export default function VendorOrders() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [orders, setOrders] = useState<any[]>([]);
-  const [state, setState] = useState<"loading" | "error" | "done">("loading");
-  const [refreshing, setRefreshing] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const data = await api.vendorOrders();
-      setOrders(data);
-      setState("done");
-    } catch {
-      setState("error");
-    }
-  }, []);
+  const { orders, loading, newCount, refresh, markSeen } = useVendorOrders();
+  const seenTimer = useRef<any>(null);
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load])
+      refresh();
+      // clear the "new" badge shortly after the vendor views the list
+      seenTimer.current = setTimeout(markSeen, 1500);
+      return () => seenTimer.current && clearTimeout(seenTimer.current);
+    }, [refresh, markSeen])
   );
 
   const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    await refresh();
   };
 
   const active = orders.filter((o) => ["novo", "editando", "pronto"].includes(o.status)).length;
@@ -43,6 +33,14 @@ export default function VendorOrders() {
 
   const header = (
     <View>
+      {newCount > 0 && (
+        <View style={styles.alertBanner} testID="new-orders-banner">
+          <Ionicons name="notifications" size={18} color="#fff" />
+          <Text style={styles.alertText}>
+            {newCount} {newCount === 1 ? "novo pedido chegou!" : "novos pedidos chegaram!"}
+          </Text>
+        </View>
+      )}
       <View style={styles.metrics}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{active}</Text>
@@ -76,17 +74,15 @@ export default function VendorOrders() {
       <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
         <Text style={styles.title}>Pedidos</Text>
       </View>
-      {state === "loading" ? (
+      {loading ? (
         <Loading />
-      ) : state === "error" ? (
-        <ErrorState onRetry={load} />
       ) : (
         <FlatList
           data={orders}
           keyExtractor={(o) => o.id}
           ListHeaderComponent={header}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandPrimary} />}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={onRefresh} tintColor={colors.brandPrimary} />}
           ListEmptyComponent={
             <EmptyState icon="cube-outline" title="Nenhum pedido no momento" subtitle="Os pedidos dos clientes aparecerão aqui." />
           }
@@ -123,6 +119,16 @@ const styles = StyleSheet.create({
   headerBar: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   title: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
   metrics: { flexDirection: "row", gap: spacing.md, marginBottom: spacing.lg },
+  alertBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.brandSecondary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  alertText: { color: "#fff", fontSize: font.base, fontWeight: "700" },
   metricCard: {
     flex: 1,
     backgroundColor: colors.brandTertiary,

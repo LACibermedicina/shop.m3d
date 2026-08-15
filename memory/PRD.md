@@ -24,18 +24,22 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 
 ## Implemented (2026-08-13)
 - Auth Google (Emergent) + dev-login para testes (gated por DEV_LOGIN_SECRET); roles + admin por ADMIN_EMAILS.
-- Admin: CRUD barracas (soft delete), métricas globais, gestão de usuários + atribuição lojista→barraca.
+- Admin: CRUD barracas (soft delete) + toggle "Destaque na home", métricas globais, gestão de usuários + atribuição lojista→barraca.
 - Lojista: import por IA (mensagem + foto), CRUD produtos, lista de pedidos com métricas, edição de itens e status.
-- Cliente: marketplace grid, catálogo por barraca com ordenação (recentes/nome/preço), sacola agrupada por barraca, checkout multi-barraca, envio via wa.me com link do PDF.
+- Cliente: marketplace grid, catálogo por barraca com ordenação, sacola agrupada, checkout multi-barraca, envio via wa.me com link do PDF.
 - Pedidos: criação, visualização pública por token, edição de itens (recalcula total), status, PDF profissional (reportlab).
 - Upload de imagens via Object Storage; exibição pública com expo-image (lazy).
-- Testes: backend 31/31 pass; fluxos frontend admin e cliente verificados.
+
+### Iteração 2 (2026-08-13) — features adicionais
+- **Vitrine em Destaque**: home com carrossel "Destaques da feira" (barracas featured) + "Novidades" (produtos recentes). Endpoint GET /api/home.
+- **Busca na Feira**: barra de busca na home filtrando barracas e produtos (debounce). Endpoint GET /api/search?q=.
+- **Alertas de Pedido**: contexto de polling (15s) no grupo lojista, banner "novo pedido chegou!" + badge na aba Pedidos, marca como visto ao abrir.
+- **WhatsApp Oficial (Cloud API)**: backend completo (webhook verify/receive → cria produto via IA + download de mídia p/ Object Storage; POST /api/orders/send-whatsapp envia texto + PDF). **DORMENTE** — usuário optou por manter wa.me por enquanto. Ativar setando WA_ACCESS_TOKEN, WA_PHONE_NUMBER_ID, META_APP_SECRET, WA_VERIFY_TOKEN, PUBLIC_BASE_URL no backend/.env.
 
 ## Backlog
-- P1: Integração WhatsApp Cloud API/Green API (webhook receber produtos + envio automático de pedidos com PDF anexado).
-- P1: Busca/filtro de produtos e barracas; categorias.
-- P2: Avaliações de barracas; favoritos; histórico de faturamento por período (gráficos).
-- P2: Notificações de novos pedidos para lojista.
+- P1: Ativar WhatsApp Cloud API quando o usuário fornecer credenciais (código pronto, dormente).
+- P1: Green API como alternativa mais simples.
+- P2: Categorias/filtros de produtos; avaliações; favoritos; gráficos de faturamento por período.
 - P2: Desabilitar dev-login em produção (EXPO_PUBLIC_ENABLE_DEV_LOGIN=false).
 
 ## Next tasks

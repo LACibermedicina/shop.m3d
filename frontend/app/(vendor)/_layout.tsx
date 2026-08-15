@@ -1,9 +1,24 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Platform } from "react-native";
+import { View, Text, StyleSheet, Platform } from "react-native";
 import { colors, spacing, font } from "@/src/theme";
+import { VendorOrdersProvider, useVendorOrders } from "@/src/vendorOrders";
 
-export default function VendorLayout() {
+function OrdersIcon({ color, size }: { color: string; size: number }) {
+  const { newCount } = useVendorOrders();
+  return (
+    <View>
+      <Ionicons name="receipt-outline" size={size} color={color} />
+      {newCount > 0 && (
+        <View style={styles.badge} testID="vendor-orders-badge">
+          <Text style={styles.badgeText}>{newCount > 99 ? "99+" : newCount}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function VendorTabs() {
   return (
     <Tabs
       screenOptions={{
@@ -24,7 +39,7 @@ export default function VendorLayout() {
         name="index"
         options={{
           title: "Pedidos",
-          tabBarIcon: ({ color, size }) => <Ionicons name="receipt-outline" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => <OrdersIcon color={color} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -44,3 +59,27 @@ export default function VendorLayout() {
     </Tabs>
   );
 }
+
+export default function VendorLayout() {
+  return (
+    <VendorOrdersProvider>
+      <VendorTabs />
+    </VendorOrdersProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  badge: {
+    position: "absolute",
+    top: -6,
+    right: -10,
+    backgroundColor: colors.brandSecondary,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+  },
+  badgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+});

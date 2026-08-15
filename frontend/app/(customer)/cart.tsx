@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -35,6 +35,24 @@ export default function Cart() {
   const { items, setQty, remove, clear, total, count } = useCart();
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<CreatedOrder[] | null>(null);
+  const [waConfigured, setWaConfigured] = useState(false);
+
+  useEffect(() => {
+    api.whatsappStatus().then((r) => setWaConfigured(!!r.configured)).catch(() => {});
+  }, []);
+
+  const sendOrder = async (o: CreatedOrder) => {
+    if (waConfigured) {
+      try {
+        await api.sendOrderWhatsApp(o.id);
+        toast("Pedido enviado ao lojista pelo WhatsApp!", "success");
+        return;
+      } catch {
+        toast("Abrindo WhatsApp...", "info");
+      }
+    }
+    Linking.openURL(o.waUrl);
+  };
 
   const groups = items.reduce<Record<string, CartItem[]>>((acc, it) => {
     (acc[it.store_id] = acc[it.store_id] || []).push(it);
@@ -203,7 +221,7 @@ export default function Cart() {
                 </Pressable>
                 <Pressable
                   testID={`send-whatsapp-${o.id}`}
-                  onPress={() => Linking.openURL(o.waUrl)}
+                  onPress={() => sendOrder(o)}
                   style={styles.waBtn}
                 >
                   <Ionicons name="logo-whatsapp" size={18} color="#fff" />

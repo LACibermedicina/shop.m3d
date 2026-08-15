@@ -33,6 +33,15 @@ EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 DEV_LOGIN_SECRET = os.environ.get("DEV_LOGIN_SECRET", "")
 ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
 
+# WhatsApp Cloud API (optional — dormant until configured)
+WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "").strip()
+WA_PHONE_NUMBER_ID = os.environ.get("WA_PHONE_NUMBER_ID", "").strip()
+WA_VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "").strip()
+META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
+WA_API_VERSION = os.environ.get("WA_API_VERSION", "v25.0").strip()
+WA_CONFIGURED = bool(WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID)
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
+
 # ------------------------------------------------------------------ Storage
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
 STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
@@ -95,6 +104,11 @@ class StoreIn(BaseModel):
     logo: Optional[str] = ""
     whatsapp: str
     owner_user_id: Optional[str] = None
+    featured: Optional[bool] = False
+
+
+class SendWhatsApp(BaseModel):
+    order_id: str
 
 
 class ProductIn(BaseModel):
@@ -582,6 +596,177 @@ async def set_role(user_id: str, body: RoleUpdate, user=Depends(require_role("ad
     updates = {"role": body.role, "store_id": body.store_id if body.role == "lojista" else None}
     await db.users.update_one({"user_id": user_id}, {"$set": updates})
     return await db.users.find_one({"user_id": user_id}, {"_id": 0})
+
+
+@api.get("/home")
+async def home():
+    stores = await db.stores.find(
+        {"deleted": {"$ne": True}, "active": {"$ne": False}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    for s in stores:
+        s["product_count"] = await db.products.count_documents(
+            {"store_id": s["id"], "deleted": {"$ne": True}}
+        )
+    featured = [s for s in stores if s.get("featured")]
+    if not featured:
+        featured = stores[:6]
+    store_ids = [s["id"] for s in stores]
+    smap = {s["id"]: s["name"] for s in stores}
+    prods = await db.products.find(
+        {"store_id": {"$in": store_ids}, "deleted": {"$ne": True}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(12)
+    for p in prods:
+        p["store_name"] = smap.get(p["store_id"], "")
+    return {"featured_stores": featured, "new_products": prods}
+
+
+@api.get("/search")
+async def search(q: str = Query("")):
+    q = q.strip()
+    if not q:
+        return {"stores": [], "products": []}
+    rx = {"$regex": re.escape(q), "$options": "i"}
+    stores = await db.stores.find(
+        {"deleted": {"$ne": True}, "active": {"$ne": False}, "name": rx}, {"_id": 0}
+    ).to_list(50)
+    for s in stores:
+        s["product_count"] = await db.products.count_documents(
+            {"store_id": s["id"], "deleted": {"$ne": True}}
+        )
+    active_ids = await db.stores.distinct("id", {"deleted": {"$ne": True}, "active": {"$ne": False}})
+    all_stores = await db.stores.find({"id": {"$in": active_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    smap = {s["id"]: s["name"] for s in all_stores}
+    products = await db.products.find(
+        {"deleted": {"$ne": True}, "store_id": {"$in": active_ids},
+         "$or": [{"name": rx}, {"description": rx}]}, {"_id": 0}
+    ).to_list(50)
+    for p in products:
+        p["store_name"] = smap.get(p["store_id"], "")
+    return {"stores": stores, "products": products}
+
+
+# ------------------------------------------------------------------ WhatsApp Cloud API
+@api.get("/whatsapp/status")
+async def whatsapp_status():
+    return {"configured": WA_CONFIGURED}
+
+
+async def wa_send(payload: dict):
+    url = f"https://graph.facebook.com/{WA_API_VERSION}/{WA_PHONE_NUMBER_ID}/messages"
+    async with httpx.AsyncClient(timeout=20) as hc:
+        r = await hc.post(url, headers={"Authorization": f"Bearer {WA_ACCESS_TOKEN}"},
+                          json={"messaging_product": "whatsapp", "recipient_type": "individual", **payload})
+    if r.status_code >= 400:
+        logger.error(f"WA send error {r.status_code}: {r.text}")
+        raise HTTPException(status_code=502, detail="Falha ao enviar pelo WhatsApp")
+    return r.json()
+
+
+@api.post("/orders/send-whatsapp")
+async def send_order_whatsapp(body: SendWhatsApp, user=Depends(get_current_user)):
+    if not WA_CONFIGURED:
+        raise HTTPException(status_code=400, detail="WhatsApp oficial não configurado")
+    o = await db.orders.find_one({"id": body.order_id, "deleted": {"$ne": True}}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+    num = (o["store_whatsapp"] or "").replace(" ", "").replace("+", "")
+    lines = "\n".join([f"• {i['qty']}x {i['name']} — R$ {i['price'] * i['qty']:.2f}" for i in o["items"]])
+    text = (f"*Novo pedido — Feira Online*\nCliente: {o.get('customer_name','')}\n\n{lines}\n\n"
+            f"*Total: R$ {o['total']:.2f}*")
+    result = await wa_send({"to": num, "type": "text", "text": {"body": text}})
+    base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
+    if base:
+        pdf_link = f"{base}/api/orders/{o['id']}/pdf?token={o['token']}"
+        await wa_send({"to": num, "type": "document",
+                       "document": {"link": pdf_link, "filename": f"pedido-{o['id']}.pdf",
+                                    "caption": "Lista do pedido em PDF"}})
+    await db.orders.update_one({"id": o["id"]}, {"$set": {"whatsapp_sent": True}})
+    return {"ok": True, "result": result}
+
+
+@api.get("/webhooks/whatsapp")
+async def wa_verify(request: Request):
+    params = request.query_params
+    if params.get("hub.mode") == "subscribe" and params.get("hub.verify_token") == WA_VERIFY_TOKEN and WA_VERIFY_TOKEN:
+        challenge = params.get("hub.challenge", "")
+        return int(challenge) if challenge.isdigit() else challenge
+    raise HTTPException(status_code=403, detail="verification failed")
+
+
+def _valid_wa_signature(raw: bytes, header: Optional[str]) -> bool:
+    if not META_APP_SECRET:
+        return True  # signature check disabled if secret not set
+    if not header or not header.startswith("sha256="):
+        return False
+    import hmac, hashlib
+    expected = hmac.new(META_APP_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(header[7:], expected)
+
+
+@api.post("/webhooks/whatsapp")
+async def wa_webhook(request: Request):
+    raw = await request.body()
+    if not _valid_wa_signature(raw, request.headers.get("x-hub-signature-256")):
+        raise HTTPException(status_code=403, detail="bad signature")
+    payload = json.loads(raw or b"{}")
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            for msg in value.get("messages", []):
+                try:
+                    await _process_inbound(msg)
+                except Exception as e:
+                    logger.error(f"inbound process error: {e}")
+    return {"ok": True}
+
+
+async def _process_inbound(msg: dict):
+    mid = msg.get("id")
+    if not mid or await db.whatsapp_events.find_one({"message_id": mid}):
+        return
+    await db.whatsapp_events.insert_one({"message_id": mid, "created_at": now_iso(), "from": msg.get("from")})
+    sender = (msg.get("from") or "").replace("+", "")
+    # match a store by whatsapp number (last 10-11 digits)
+    stores = await db.stores.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(1000)
+    store = None
+    for s in stores:
+        digits = (s.get("whatsapp") or "").replace(" ", "").replace("+", "")
+        if digits and (digits.endswith(sender[-10:]) or sender.endswith(digits[-10:])):
+            store = s
+            break
+    if not store:
+        logger.warning(f"WA inbound from unknown store number {sender}")
+        return
+    text = (msg.get("text") or {}).get("body", "")
+    image_path = ""
+    image = msg.get("image")
+    if image and image.get("id"):
+        try:
+            image_path = await _download_wa_media(image["id"])
+        except Exception as e:
+            logger.warning(f"WA media download failed: {e}")
+        text = text or image.get("caption", "")
+    parsed = await extract_product(text, image_path)
+    doc = {"id": new_id("prod"), "store_id": store["id"], "name": parsed["name"] or "Produto",
+           "description": parsed["description"], "price": parsed["price"], "image": image_path,
+           "deleted": False, "created_at": now_iso(), "source": "whatsapp"}
+    await db.products.insert_one(doc)
+    logger.info(f"WA product created for store {store['id']}: {doc['name']}")
+
+
+async def _download_wa_media(media_id: str) -> str:
+    async with httpx.AsyncClient(timeout=30) as hc:
+        meta = await hc.get(f"https://graph.facebook.com/{WA_API_VERSION}/{media_id}",
+                           headers={"Authorization": f"Bearer {WA_ACCESS_TOKEN}"})
+        meta.raise_for_status()
+        info = meta.json()
+        blob = await hc.get(info["url"], headers={"Authorization": f"Bearer {WA_ACCESS_TOKEN}"})
+        blob.raise_for_status()
+    ct = info.get("mime_type", "image/jpeg")
+    ext = "png" if "png" in ct else "jpg"
+    path = f"{APP_NAME}/whatsapp/{uuid.uuid4().hex}.{ext}"
+    await run_in_threadpool(put_object, path, blob.content, ct)
+    return path
 
 
 @api.get("/")
