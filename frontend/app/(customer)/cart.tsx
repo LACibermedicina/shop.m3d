@@ -62,7 +62,7 @@ export default function Cart() {
   const buildWa = (order: any, storeItems: CartItem[]) => {
     const pdf = api.pdfUrl(order.id, order.token);
     const lines = storeItems.map((i) => `• ${i.qty}x ${i.name} — ${money(i.price * i.qty)}`).join("\n");
-    const text = `*Novo pedido — Feira Online*\nBarraca: ${order.store_name}\n\n${lines}\n\n*Total: ${money(
+    const text = `*Novo pedido — Lojas da Fronteira*\nLoja: ${order.store_name}\n\n${lines}\n\n*Total: ${money(
       order.total
     )}*\n\nLista em PDF: ${pdf}\nVer/editar pedido: ${pdf}`;
     const num = (order.store_whatsapp || "").replace(/\D/g, "");
@@ -112,8 +112,8 @@ export default function Cart() {
         <EmptyState
           icon="bag-handle-outline"
           title="Sua sacola está vazia"
-          subtitle="Adicione produtos das barracas para começar."
-          action={<Button title="Explorar barracas" onPress={() => router.push("/(customer)")} testID="explore-button" />}
+          subtitle="Adicione produtos das lojas para começar."
+          action={<Button title="Explorar lojas" onPress={() => router.push("/(customer)")} testID="explore-button" />}
         />
       </View>
     );

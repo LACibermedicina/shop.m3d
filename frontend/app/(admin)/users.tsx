@@ -86,7 +86,7 @@ export default function AdminUsers() {
                     {item.email}
                   </Text>
                   {item.role === "lojista" && item.store_id && (
-                    <Text style={styles.storeTag}>🏪 {storeName(item.store_id) || "Barraca"}</Text>
+                    <Text style={styles.storeTag}>🏪 {storeName(item.store_id) || "Loja"}</Text>
                   )}
                 </View>
               </View>

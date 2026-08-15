@@ -47,3 +47,14 @@ export const shadow = {
 
 export const money = (n: number) =>
   `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
+
+export const CATEGORIES = [
+  "Frutas",
+  "Verduras",
+  "Legumes",
+  "Laticínios",
+  "Padaria",
+  "Bebidas",
+  "Carnes",
+  "Outros",
+];

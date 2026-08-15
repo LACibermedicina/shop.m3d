@@ -17,8 +17,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, fileUrl, uploadImage } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { pickImage, openAppSettings } from "@/src/imagePicker";
-import { Loading, EmptyState, ErrorState, Button, Field, useToast } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { Loading, EmptyState, ErrorState, Button, Field, Chip, useToast } from "@/src/ui";
+import { colors, spacing, radius, font, shadow, money, CATEGORIES } from "@/src/theme";
 
 export default function VendorCatalog() {
   const insets = useSafeAreaInsets();
@@ -43,6 +43,7 @@ export default function VendorCatalog() {
   const [fDesc, setFDesc] = useState("");
   const [fImagePath, setFImagePath] = useState("");
   const [fImageUri, setFImageUri] = useState("");
+  const [fCategory, setFCategory] = useState("Outros");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -108,6 +109,7 @@ export default function VendorCatalog() {
       setFName(parsed.name || "");
       setFPrice(parsed.price ? String(parsed.price) : "");
       setFDesc(parsed.description || "");
+      setFCategory(parsed.category || "Outros");
       setFImagePath(aiImagePath || "");
       setFImageUri(aiImageUri || "");
       setFormOpen(true);
@@ -124,6 +126,7 @@ export default function VendorCatalog() {
     setFName("");
     setFPrice("");
     setFDesc("");
+    setFCategory("Outros");
     setFImagePath("");
     setFImageUri("");
     setFormOpen(true);
@@ -134,6 +137,7 @@ export default function VendorCatalog() {
     setFName(p.name);
     setFPrice(String(p.price));
     setFDesc(p.description || "");
+    setFCategory(p.category || "Outros");
     setFImagePath(p.image || "");
     setFImageUri("");
     setFormOpen(true);
@@ -153,6 +157,7 @@ export default function VendorCatalog() {
           price,
           description: fDesc,
           image: fImagePath,
+          category: fCategory,
         });
       } else {
         await api.createProduct({
@@ -161,6 +166,7 @@ export default function VendorCatalog() {
           price,
           description: fDesc,
           image: fImagePath,
+          category: fCategory,
         });
       }
       setFormOpen(false);
@@ -194,8 +200,8 @@ export default function VendorCatalog() {
         </View>
         <EmptyState
           icon="storefront-outline"
-          title="Nenhuma barraca vinculada"
-          subtitle="Peça ao administrador para vincular sua conta a uma barraca."
+          title="Nenhuma loja vinculada"
+          subtitle="Peça ao administrador para vincular sua conta a uma loja."
         />
       </View>
     );
@@ -313,6 +319,18 @@ export default function VendorCatalog() {
                 placeholder="Detalhes do produto"
                 multiline
               />
+              <Text style={styles.catLabel}>Categoria</Text>
+              <View style={styles.catWrap}>
+                {CATEGORIES.map((c) => (
+                  <Chip
+                    key={c}
+                    testID={`form-cat-${c}`}
+                    label={c}
+                    active={fCategory === c}
+                    onPress={() => setFCategory(c)}
+                  />
+                ))}
+              </View>
               <Button title="Salvar produto" onPress={saveProduct} loading={saving} testID="save-product-button" />
             </ScrollView>
           </View>
@@ -414,4 +432,6 @@ const styles = StyleSheet.create({
   },
   formImageInner: { width: "100%", height: "100%" },
   formImageText: { fontSize: font.base, color: colors.brandPrimary, fontWeight: "600", marginTop: 4 },
+  catLabel: { fontSize: font.base, fontWeight: "600", color: colors.onSurface, marginBottom: spacing.sm },
+  catWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.lg },
 });

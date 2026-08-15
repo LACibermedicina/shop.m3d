@@ -16,9 +16,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/src/auth";
 import { Button, Field, useToast, Chip } from "@/src/ui";
 import { colors, spacing, radius, font, shadow } from "@/src/theme";
+import { HERO_IMAGE } from "@/src/images";
 
-const HERO =
-  "https://images.unsplash.com/photo-1485637701894-09ad422f6de6?crop=entropy&cs=srgb&fm=jpg&w=1000&q=80";
+const HERO = HERO_IMAGE;
 
 const DEV_ENABLED = process.env.EXPO_PUBLIC_ENABLE_DEV_LOGIN === "true";
 
@@ -79,10 +79,10 @@ export default function Login() {
               <View style={styles.logoBadge}>
                 <Ionicons name="basket" size={26} color="#fff" />
               </View>
-              <Text style={styles.brand}>Feira Online</Text>
+              <Text style={styles.brand}>Lojas da Fronteira</Text>
             </View>
             <Text style={styles.subtitle}>
-              Compre direto das barracas da sua feira, sem sair de casa.
+              Compre nas lojas da Tríplice Fronteira, sem sair de casa.
             </Text>
 
             <Pressable

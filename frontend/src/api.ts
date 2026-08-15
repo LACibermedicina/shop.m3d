@@ -104,8 +104,16 @@ export const api = {
   updateStore: (id: string, b: any) => apiRequest(`/stores/${id}`, { method: "PUT", body: b }),
   deleteStore: (id: string) => apiRequest(`/stores/${id}`, { method: "DELETE" }),
 
-  products: (storeId: string, sort = "recent") =>
-    apiRequest(`/stores/${storeId}/products?sort=${sort}`, { auth: false }),
+  products: (storeId: string, sort = "recent", category = "") =>
+    apiRequest(`/stores/${storeId}/products?sort=${sort}${category ? `&category=${encodeURIComponent(category)}` : ""}`, { auth: false }),
+  reviews: (storeId: string) => apiRequest(`/stores/${storeId}/reviews`, { auth: false }),
+  addReview: (storeId: string, rating: number, comment: string) =>
+    apiRequest(`/stores/${storeId}/reviews`, { method: "POST", body: { rating, comment } }),
+  favoriteIds: () => apiRequest("/my/favorite-ids"),
+  favorites: () => apiRequest("/my/favorites"),
+  addFavorite: (storeId: string) => apiRequest(`/favorites/${storeId}`, { method: "POST" }),
+  removeFavorite: (storeId: string) => apiRequest(`/favorites/${storeId}`, { method: "DELETE" }),
+  vendorReport: () => apiRequest("/vendor/report"),
   createProduct: (b: any) => apiRequest("/products", { method: "POST", body: b }),
   updateProduct: (id: string, b: any) => apiRequest(`/products/${id}`, { method: "PUT", body: b }),
   deleteProduct: (id: string) => apiRequest(`/products/${id}`, { method: "DELETE" }),

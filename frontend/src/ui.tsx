@@ -228,6 +228,28 @@ export function StatusBadge({ status }: { status: string }) {
   );
 }
 
+/* ------------------------------------------------------------------ Stars */
+export function Stars({ value, size = 14, count }: { value: number; size?: number; count?: number }) {
+  const full = Math.round(value);
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Ionicons
+          key={i}
+          name={i <= full ? "star" : "star-outline"}
+          size={size}
+          color={i <= full ? "#E8A33D" : colors.borderStrong}
+        />
+      ))}
+      {typeof count === "number" && (
+        <Text style={{ fontSize: font.sm, color: colors.onSurfaceTertiary, marginLeft: 4 }}>
+          {value > 0 ? value.toFixed(1) : "Novo"}{count > 0 ? ` (${count})` : ""}
+        </Text>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   toast: {
     position: "absolute",

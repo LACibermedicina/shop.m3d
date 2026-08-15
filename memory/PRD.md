@@ -36,10 +36,17 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 - **Alertas de Pedido**: contexto de polling (15s) no grupo lojista, banner "novo pedido chegou!" + badge na aba Pedidos, marca como visto ao abrir.
 - **WhatsApp Oficial (Cloud API)**: backend completo (webhook verify/receive → cria produto via IA + download de mídia p/ Object Storage; POST /api/orders/send-whatsapp envia texto + PDF). **DORMENTE** — usuário optou por manter wa.me por enquanto. Ativar setando WA_ACCESS_TOKEN, WA_PHONE_NUMBER_ID, META_APP_SECRET, WA_VERIFY_TOKEN, PUBLIC_BASE_URL no backend/.env.
 
+### Iteração 3 (2026-08-15) — features + rebrand
+- **Rebrand "feira" → "Lojas da Fronteira"**: textos, marca e terminologia (barraca→loja) atualizados em todo o app, backend e PDF.
+- **Imagens regionais da Tríplice Fronteira**: Ponte da Amizade, Marco das 3 Fronteiras, Cataratas, Mesquita Omar (diversidade étnica) via Wikimedia Commons (Special:FilePath). `src/images.ts` com `regionalImageFor(id)` para variar contextos por loja.
+- **Categorias de Produtos**: campo `category` (Frutas/Verduras/Legumes/Laticínios/Padaria/Bebidas/Carnes/Outros), chips no cadastro (lojista) + IA extrai categoria; filtro por categoria no catálogo (GET products?category=).
+- **Favoritar Lojas**: coleção favorites; POST/DELETE /api/favorites/{id}, GET /my/favorites e /my/favorite-ids. Coração nos cards e no hero da loja + faixa "Suas lojas favoritas" na home.
+- **Avaliações de Loja**: coleção reviews (1 por usuário/loja, upsert); POST/GET /api/stores/{id}/reviews; média (avg_rating/review_count) exibida em cards, home, busca e hero; modal de avaliação com estrelas + comentário.
+- **Relatório de Vendas (lojista)**: nova aba "Vendas" com cards (total, pedidos, ticket médio) e gráficos de barras (faturamento por dia — 7 dias; por semana — 4 semanas). GET /api/vendor/report.
+
 ## Backlog
 - P1: Ativar WhatsApp Cloud API quando o usuário fornecer credenciais (código pronto, dormente).
-- P1: Green API como alternativa mais simples.
-- P2: Categorias/filtros de produtos; avaliações; favoritos; gráficos de faturamento por período.
+- P2: Filtro de categoria também na home; ordenação por avaliação; favoritos offline.
 - P2: Desabilitar dev-login em produção (EXPO_PUBLIC_ENABLE_DEV_LOGIN=false).
 
 ## Next tasks

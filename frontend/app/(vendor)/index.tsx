@@ -62,8 +62,8 @@ export default function VendorOrders() {
         </View>
         <EmptyState
           icon="storefront-outline"
-          title="Nenhuma barraca vinculada"
-          subtitle="Peça ao administrador para vincular sua conta a uma barraca."
+          title="Nenhuma loja vinculada"
+          subtitle="Peça ao administrador para vincular sua conta a uma loja."
         />
       </View>
     );

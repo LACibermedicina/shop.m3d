@@ -108,7 +108,7 @@ export default function AdminStores() {
       if (editing) await api.updateStore(editing.id, body);
       else await api.createStore(body);
       setFormOpen(false);
-      toast("Barraca salva", "success");
+      toast("Loja salva", "success");
       await load();
     } catch (e: any) {
       toast(e.message || "Falha ao salvar", "error");
@@ -121,7 +121,7 @@ export default function AdminStores() {
     try {
       await api.deleteStore(s.id);
       setStores((prev) => prev.filter((x) => x.id !== s.id));
-      toast("Barraca excluída", "success");
+      toast("Loja excluída", "success");
     } catch {
       toast("Falha ao excluir", "error");
     }
@@ -130,7 +130,7 @@ export default function AdminStores() {
   return (
     <View style={styles.container}>
       <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>Barracas</Text>
+        <Text style={styles.title}>Lojas</Text>
       </View>
 
       {state === "loading" ? (
@@ -143,7 +143,7 @@ export default function AdminStores() {
           keyExtractor={(s) => s.id}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 90 }}
           ListEmptyComponent={
-            <EmptyState icon="business-outline" title="Nenhuma loja cadastrada" subtitle="Toque em + para criar a primeira barraca." />
+            <EmptyState icon="business-outline" title="Nenhuma loja cadastrada" subtitle="Toque em + para criar a primeira loja." />
           }
           renderItem={({ item }) => (
             <View style={styles.card} testID={`admin-store-${item.id}`}>
@@ -177,7 +177,7 @@ export default function AdminStores() {
           <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.lg }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalTitleRow}>
-              <Text style={styles.modalTitle}>{editing ? "Editar barraca" : "Nova barraca"}</Text>
+              <Text style={styles.modalTitle}>{editing ? "Editar loja" : "Nova loja"}</Text>
               <Pressable testID="close-store-form" onPress={() => setFormOpen(false)}>
                 <Ionicons name="close" size={24} color={colors.onSurfaceTertiary} />
               </Pressable>
@@ -189,11 +189,11 @@ export default function AdminStores() {
                 ) : (
                   <>
                     <Ionicons name="image-outline" size={28} color={colors.brandPrimary} />
-                    <Text style={styles.logoPickText}>Logo da barraca</Text>
+                    <Text style={styles.logoPickText}>Logo da loja</Text>
                   </>
                 )}
               </Pressable>
-              <Field testID="store-name" label="Nome" value={name} onChangeText={setName} placeholder="Nome da barraca" />
+              <Field testID="store-name" label="Nome" value={name} onChangeText={setName} placeholder="Nome da loja" />
               <Field testID="store-desc" label="Descrição" value={desc} onChangeText={setDesc} placeholder="Descrição" multiline />
               <Field
                 testID="store-whatsapp"
@@ -216,7 +216,7 @@ export default function AdminStores() {
                   thumbColor="#fff"
                 />
               </View>
-              <Button title="Salvar barraca" onPress={save} loading={saving} testID="save-store-button" />
+              <Button title="Salvar loja" onPress={save} loading={saving} testID="save-store-button" />
             </ScrollView>
           </View>
         </KeyboardAvoidingView>

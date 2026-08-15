@@ -17,8 +17,9 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, fileUrl } from "@/src/api";
-import { Loading, EmptyState, ErrorState } from "@/src/ui";
+import { Loading, EmptyState, ErrorState, Stars, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { regionalImageFor, PRODUCT_PLACEHOLDER } from "@/src/images";
 
 const { width } = Dimensions.get("window");
 const GAP = spacing.lg;
@@ -31,19 +32,21 @@ type Store = {
   logo?: string;
   product_count?: number;
   featured?: boolean;
+  avg_rating?: number;
+  review_count?: number;
 };
 
-const COVER =
-  "https://images.unsplash.com/photo-1542838132-92c53300491e?crop=entropy&cs=srgb&fm=jpg&w=600&q=80";
-const PROD_PLACEHOLDER =
-  "https://images.unsplash.com/photo-1659822887922-c1386185cc6b?crop=entropy&cs=srgb&fm=jpg&w=400&q=80";
+const COVER = regionalImageFor("default");
+const PROD_PLACEHOLDER = PRODUCT_PLACEHOLDER;
 
 export default function Marketplace() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
   const [stores, setStores] = useState<Store[]>([]);
   const [featured, setFeatured] = useState<Store[]>([]);
   const [newProducts, setNewProducts] = useState<any[]>([]);
+  const [favIds, setFavIds] = useState<string[]>([]);
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -52,15 +55,35 @@ export default function Marketplace() {
 
   const load = useCallback(async () => {
     try {
-      const [list, home] = await Promise.all([api.stores(), api.home()]);
+      const [list, home, favs] = await Promise.all([
+        api.stores(),
+        api.home(),
+        api.favoriteIds().catch(() => []),
+      ]);
       setStores(list);
       setFeatured(home.featured_stores || []);
       setNewProducts(home.new_products || []);
+      setFavIds(favs || []);
       setState("done");
     } catch {
       setState("error");
     }
   }, []);
+
+  const toggleFav = async (id: string) => {
+    const isFav = favIds.includes(id);
+    setFavIds((prev) => (isFav ? prev.filter((x) => x !== id) : [...prev, id]));
+    try {
+      if (isFav) await api.removeFavorite(id);
+      else {
+        await api.addFavorite(id);
+        toast("Loja adicionada aos favoritos", "success");
+      }
+    } catch {
+      // revert on error
+      setFavIds((prev) => (isFav ? [...prev, id] : prev.filter((x) => x !== id)));
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -98,24 +121,39 @@ export default function Marketplace() {
 
   const renderCard = ({ item }: { item: Store }) => {
     const logo = fileUrl(item.logo);
+    const isFav = favIds.includes(item.id);
     return (
       <Pressable
         testID={`store-card-${item.id}`}
         style={({ pressed }) => [styles.card, pressed && { opacity: 0.9 }]}
         onPress={() => openStore(item.id)}
       >
-        <Image source={{ uri: logo || COVER }} style={styles.cover} contentFit="cover" transition={200} />
+        <Image
+          source={{ uri: logo || regionalImageFor(item.id) }}
+          style={styles.cover}
+          contentFit="cover"
+          transition={200}
+        />
+        <Pressable
+          testID={`fav-toggle-${item.id}`}
+          onPress={() => toggleFav(item.id)}
+          hitSlop={8}
+          style={styles.heartBtn}
+        >
+          <Ionicons name={isFav ? "heart" : "heart-outline"} size={18} color={isFav ? colors.brandSecondary : "#fff"} />
+        </Pressable>
         <View style={styles.logoBadge}>
           {logo ? (
             <Image source={{ uri: logo }} style={styles.logoImg} contentFit="cover" />
           ) : (
-            <Ionicons name="leaf" size={18} color={colors.brandPrimary} />
+            <Ionicons name="storefront" size={18} color={colors.brandPrimary} />
           )}
         </View>
         <View style={styles.cardBody}>
           <Text style={styles.cardName} numberOfLines={1}>
             {item.name}
           </Text>
+          <Stars value={item.avg_rating || 0} count={item.review_count || 0} size={12} />
           <Text style={styles.cardMeta}>
             {item.product_count || 0} {item.product_count === 1 ? "produto" : "produtos"}
           </Text>
@@ -131,7 +169,7 @@ export default function Marketplace() {
         testID="search-input"
         value={query}
         onChangeText={setQuery}
-        placeholder="Buscar barracas ou produtos"
+        placeholder="Buscar lojas ou produtos"
         placeholderTextColor={colors.muted}
         style={styles.searchInput}
         autoCapitalize="none"
@@ -145,11 +183,34 @@ export default function Marketplace() {
     </View>
   );
 
+  const favStores = stores.filter((s) => favIds.includes(s.id));
+
   const carousels = (
     <View>
+      {favStores.length > 0 && (
+        <View style={{ marginBottom: spacing.lg }}>
+          <Text style={styles.sectionTitle}>❤️ Suas lojas favoritas</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
+            {favStores.map((s) => (
+              <Pressable
+                key={s.id}
+                testID={`fav-store-${s.id}`}
+                style={styles.featuredCard}
+                onPress={() => openStore(s.id)}
+              >
+                <Image source={{ uri: fileUrl(s.logo) || regionalImageFor(s.id) }} style={styles.featuredImg} contentFit="cover" />
+                <View style={styles.featuredOverlay}>
+                  <Text style={styles.featuredName} numberOfLines={1}>{s.name}</Text>
+                  <Text style={styles.featuredMeta}>{s.product_count || 0} produtos</Text>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
       {featured.length > 0 && (
         <View style={{ marginBottom: spacing.lg }}>
-          <Text style={styles.sectionTitle}>⭐ Destaques da feira</Text>
+          <Text style={styles.sectionTitle}>⭐ Destaques da fronteira</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
             {featured.map((s) => (
               <Pressable
@@ -158,7 +219,7 @@ export default function Marketplace() {
                 style={styles.featuredCard}
                 onPress={() => openStore(s.id)}
               >
-                <Image source={{ uri: fileUrl(s.logo) || COVER }} style={styles.featuredImg} contentFit="cover" />
+                <Image source={{ uri: fileUrl(s.logo) || regionalImageFor(s.id) }} style={styles.featuredImg} contentFit="cover" />
                 <View style={styles.featuredOverlay}>
                   <Text style={styles.featuredName} numberOfLines={1}>
                     {s.name}
@@ -198,7 +259,7 @@ export default function Marketplace() {
           </ScrollView>
         </View>
       )}
-      <Text style={styles.sectionTitle}>Todas as barracas</Text>
+      <Text style={styles.sectionTitle}>Todas as lojas</Text>
     </View>
   );
 
@@ -218,7 +279,7 @@ export default function Marketplace() {
           <>
             {r.stores.length > 0 && (
               <>
-                <Text style={styles.sectionTitle}>Barracas</Text>
+                <Text style={styles.sectionTitle}>Lojas</Text>
                 {r.stores.map((s) => (
                   <Pressable
                     key={s.id}
@@ -226,7 +287,7 @@ export default function Marketplace() {
                     style={styles.resultRow}
                     onPress={() => openStore(s.id)}
                   >
-                    <Image source={{ uri: fileUrl(s.logo) || COVER }} style={styles.resultImg} contentFit="cover" />
+                    <Image source={{ uri: fileUrl(s.logo) || regionalImageFor(s.id) }} style={styles.resultImg} contentFit="cover" />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.resultName}>{s.name}</Text>
                       <Text style={styles.resultMeta}>{s.product_count || 0} produtos</Text>
@@ -271,8 +332,8 @@ export default function Marketplace() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.hello}>Feira Online</Text>
-        <Text style={styles.subtitle}>Compre direto das barracas da sua feira</Text>
+        <Text style={styles.hello}>Lojas da Fronteira</Text>
+        <Text style={styles.subtitle}>Compre nas lojas da Tríplice Fronteira</Text>
         {searchBar}
       </View>
 
@@ -296,8 +357,8 @@ export default function Marketplace() {
           ListEmptyComponent={
             <EmptyState
               icon="basket-outline"
-              title="Nenhuma barraca disponível"
-              subtitle="Volte em breve — novas barracas estão chegando."
+              title="Nenhuma loja disponível"
+              subtitle="Volte em breve — novas lojas estão chegando."
             />
           }
         />
@@ -404,6 +465,17 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   logoImg: { width: "100%", height: "100%" },
+  heartBtn: {
+    position: "absolute",
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(26,28,25,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   cardBody: { padding: spacing.md, paddingTop: spacing.xl },
   cardName: { fontSize: font.lg, fontWeight: "700", color: colors.onSurface },
   cardMeta: { fontSize: font.sm, color: colors.onSurfaceTertiary, marginTop: 2 },

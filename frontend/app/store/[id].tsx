@@ -7,6 +7,10 @@ import {
   Pressable,
   Dimensions,
   ScrollView,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -16,8 +20,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { api, fileUrl } from "@/src/api";
 import { useCart } from "@/src/cart";
-import { Loading, EmptyState, ErrorState, Chip, useToast } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { Loading, EmptyState, ErrorState, Chip, Stars, Button, useToast } from "@/src/ui";
+import { colors, spacing, radius, font, shadow, money, CATEGORIES } from "@/src/theme";
+import { regionalImageFor, PRODUCT_PLACEHOLDER } from "@/src/images";
 
 const { width } = Dimensions.get("window");
 const GAP = spacing.lg;
@@ -30,8 +35,8 @@ const SORTS = [
   { key: "price_desc", label: "Maior preço" },
 ];
 
-const PLACEHOLDER =
-  "https://images.unsplash.com/photo-1659822887922-c1386185cc6b?crop=entropy&cs=srgb&fm=jpg&w=500&q=80";
+const CATS = ["Todos", ...CATEGORIES];
+const PLACEHOLDER = PRODUCT_PLACEHOLDER;
 
 export default function StoreCatalog() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -41,21 +46,35 @@ export default function StoreCatalog() {
   const { add, count } = useCart();
   const [store, setStore] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [isFav, setIsFav] = useState(false);
   const [sort, setSort] = useState("recent");
+  const [category, setCategory] = useState("Todos");
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [rating, setRating] = useState(5);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(
-    async (s = sort) => {
+    async (s = sort, c = category) => {
       try {
-        const [st, pr] = await Promise.all([api.store(id), api.products(id, s)]);
+        const [st, pr, rv, favs] = await Promise.all([
+          api.store(id),
+          api.products(id, s, c),
+          api.reviews(id).catch(() => ({ reviews: [] })),
+          api.favoriteIds().catch(() => []),
+        ]);
         setStore(st);
         setProducts(pr);
+        setReviews(rv.reviews || []);
+        setIsFav((favs || []).includes(id));
         setState("done");
       } catch {
         setState("error");
       }
     },
-    [id, sort]
+    [id, sort, category]
   );
 
   useFocusEffect(
@@ -67,7 +86,28 @@ export default function StoreCatalog() {
   const changeSort = async (key: string) => {
     setSort(key);
     setState("loading");
-    await load(key);
+    await load(key, category);
+  };
+
+  const changeCategory = async (key: string) => {
+    setCategory(key);
+    setState("loading");
+    await load(sort, key);
+  };
+
+  const toggleFav = async () => {
+    const next = !isFav;
+    setIsFav(next);
+    try {
+      if (next) {
+        await api.addFavorite(id);
+        toast("Loja adicionada aos favoritos", "success");
+      } else {
+        await api.removeFavorite(id);
+      }
+    } catch {
+      setIsFav(!next);
+    }
   };
 
   const handleAdd = (p: any) => {
@@ -82,6 +122,21 @@ export default function StoreCatalog() {
       store_whatsapp: store.whatsapp,
     });
     toast(`${p.name} adicionado à sacola`, "success");
+  };
+
+  const submitReview = async () => {
+    setSubmitting(true);
+    try {
+      await api.addReview(id, rating, comment);
+      setReviewOpen(false);
+      setComment("");
+      toast("Avaliação enviada. Obrigado!", "success");
+      await load();
+    } catch (e: any) {
+      toast(e.message || "Falha ao avaliar", "error");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (state === "loading") return <Loading />;
@@ -118,6 +173,32 @@ export default function StoreCatalog() {
     );
   };
 
+  const footer = (
+    <View style={styles.reviewsSection}>
+      <View style={styles.reviewsHeader}>
+        <Text style={styles.sectionH}>Avaliações</Text>
+        <Pressable testID="write-review-button" onPress={() => setReviewOpen(true)} style={styles.reviewBtn}>
+          <Ionicons name="star" size={14} color="#fff" />
+          <Text style={styles.reviewBtnText}>Avaliar</Text>
+        </Pressable>
+      </View>
+      <Stars value={store?.avg_rating || 0} count={store?.review_count || 0} size={16} />
+      {reviews.length === 0 ? (
+        <Text style={styles.dim}>Seja o primeiro a avaliar esta loja.</Text>
+      ) : (
+        reviews.map((r) => (
+          <View key={r.id} style={styles.reviewCard} testID={`review-${r.id}`}>
+            <View style={styles.reviewTop}>
+              <Text style={styles.reviewName}>{r.user_name || "Cliente"}</Text>
+              <Stars value={r.rating} size={12} />
+            </View>
+            {!!r.comment && <Text style={styles.reviewComment}>{r.comment}</Text>}
+          </View>
+        ))
+      )}
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -131,7 +212,11 @@ export default function StoreCatalog() {
         ListHeaderComponent={
           <View>
             <View style={styles.hero}>
-              <Image source={{ uri: logo || PLACEHOLDER }} style={StyleSheet.absoluteFill} contentFit="cover" />
+              <Image
+                source={{ uri: logo || regionalImageFor(id) }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+              />
               <LinearGradient
                 colors={["rgba(26,28,25,0.15)", "rgba(26,28,25,0.85)"]}
                 style={StyleSheet.absoluteFill}
@@ -143,8 +228,18 @@ export default function StoreCatalog() {
               >
                 <Ionicons name="chevron-back" size={24} color="#fff" />
               </Pressable>
+              <Pressable
+                testID="store-fav-toggle"
+                onPress={toggleFav}
+                style={[styles.favBtn, { top: insets.top + spacing.sm }]}
+              >
+                <Ionicons name={isFav ? "heart" : "heart-outline"} size={22} color={isFav ? colors.brandSecondary : "#fff"} />
+              </Pressable>
               <View style={styles.heroInfo}>
                 <Text style={styles.heroName}>{store?.name}</Text>
+                <View style={{ marginTop: 4 }}>
+                  <Stars value={store?.avg_rating || 0} count={store?.review_count || 0} size={13} />
+                </View>
                 {!!store?.description && (
                   <Text style={styles.heroDesc} numberOfLines={2}>
                     {store.description}
@@ -152,6 +247,21 @@ export default function StoreCatalog() {
                 )}
               </View>
             </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+            >
+              {CATS.map((c) => (
+                <Chip
+                  key={c}
+                  testID={`cat-${c}`}
+                  label={c}
+                  active={category === c}
+                  onPress={() => changeCategory(c)}
+                />
+              ))}
+            </ScrollView>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -169,11 +279,12 @@ export default function StoreCatalog() {
             </ScrollView>
           </View>
         }
+        ListFooterComponent={footer}
         ListEmptyComponent={
           <EmptyState
             icon="pricetags-outline"
-            title="Esta barraca ainda não tem produtos"
-            subtitle="Aguarde novidades em breve."
+            title="Nenhum produto nesta categoria"
+            subtitle="Tente outra categoria ou volte em breve."
           />
         }
       />
@@ -188,6 +299,36 @@ export default function StoreCatalog() {
           <Text style={styles.cartCtaText}>Ver sacola ({count})</Text>
         </Pressable>
       )}
+
+      <Modal visible={reviewOpen} transparent animationType="slide" onRequestClose={() => setReviewOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Avaliar {store?.name}</Text>
+            <View style={styles.starPicker}>
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Pressable key={i} testID={`rate-star-${i}`} onPress={() => setRating(i)} hitSlop={6}>
+                  <Ionicons
+                    name={i <= rating ? "star" : "star-outline"}
+                    size={36}
+                    color={i <= rating ? "#E8A33D" : colors.borderStrong}
+                  />
+                </Pressable>
+              ))}
+            </View>
+            <TextInput
+              testID="review-comment-input"
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Conte como foi sua experiência (opcional)"
+              placeholderTextColor={colors.muted}
+              multiline
+              style={styles.reviewInput}
+            />
+            <Button title="Enviar avaliação" onPress={submitReview} loading={submitting} testID="submit-review-button" />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -205,10 +346,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  favBtn: {
+    position: "absolute",
+    right: spacing.lg,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   heroInfo: { padding: spacing.lg },
   heroName: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
   heroDesc: { fontSize: font.base, color: "rgba(255,255,255,0.9)", marginTop: 4 },
-  sortRow: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.lg },
+  chipRow: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
+  sortRow: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   pCard: {
     width: CARD_W,
     backgroundColor: colors.surfaceSecondary,
@@ -236,6 +388,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  reviewsSection: { paddingHorizontal: GAP, paddingTop: spacing.sm, gap: spacing.sm },
+  reviewsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sectionH: { fontSize: font.xl, fontWeight: "800", color: colors.onSurface },
+  reviewBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.brandPrimary,
+    paddingHorizontal: spacing.md,
+    height: 36,
+    borderRadius: radius.pill,
+  },
+  reviewBtnText: { color: "#fff", fontWeight: "700", fontSize: font.base },
+  dim: { color: colors.onSurfaceTertiary, fontSize: font.base, marginTop: spacing.xs },
+  reviewCard: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.xs,
+    ...shadow.card,
+  },
+  reviewTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  reviewName: { fontSize: font.base, fontWeight: "700", color: colors.onSurface },
+  reviewComment: { fontSize: font.base, color: colors.onSurfaceTertiary, marginTop: spacing.xs },
   cartCta: {
     position: "absolute",
     left: spacing.lg,
@@ -250,4 +426,33 @@ const styles = StyleSheet.create({
     ...shadow.float,
   },
   cartCtaText: { color: "#fff", fontSize: font.lg, fontWeight: "700" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.lg,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.borderStrong,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  modalTitle: { fontSize: font.xl, fontWeight: "800", color: colors.onSurface, marginBottom: spacing.lg },
+  starPicker: { flexDirection: "row", justifyContent: "center", gap: spacing.sm, marginBottom: spacing.lg },
+  reviewInput: {
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: font.lg,
+    color: colors.onSurface,
+    height: 90,
+    textAlignVertical: "top",
+    marginBottom: spacing.lg,
+  },
 });

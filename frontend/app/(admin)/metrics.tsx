@@ -50,7 +50,7 @@ export default function AdminMetrics() {
     <View style={styles.container}>
       <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
         <Text style={styles.title}>Métricas</Text>
-        <Text style={styles.subtitle}>Visão geral da feira</Text>
+        <Text style={styles.subtitle}>Visão geral das lojas</Text>
       </View>
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}

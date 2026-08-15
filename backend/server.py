@@ -117,6 +117,7 @@ class ProductIn(BaseModel):
     description: Optional[str] = ""
     price: float
     image: Optional[str] = ""
+    category: Optional[str] = "Outros"
 
 
 class ProductUpdate(BaseModel):
@@ -124,6 +125,12 @@ class ProductUpdate(BaseModel):
     description: Optional[str] = None
     price: Optional[float] = None
     image: Optional[str] = None
+    category: Optional[str] = None
+
+
+class ReviewIn(BaseModel):
+    rating: int
+    comment: Optional[str] = ""
 
 
 class AIImportReq(BaseModel):
@@ -282,11 +289,20 @@ async def files(path: str):
 
 
 # ------------------------------------------------------------------ Stores
+async def rating_summary(store_id: str):
+    revs = await db.reviews.find({"store_id": store_id}, {"_id": 0, "rating": 1}).to_list(2000)
+    if not revs:
+        return {"avg_rating": 0.0, "review_count": 0}
+    avg = round(sum(r["rating"] for r in revs) / len(revs), 1)
+    return {"avg_rating": avg, "review_count": len(revs)}
+
+
 @api.get("/stores")
 async def list_stores():
     stores = await db.stores.find({"deleted": {"$ne": True}, "active": {"$ne": False}}, {"_id": 0}).to_list(500)
     for s in stores:
         s["product_count"] = await db.products.count_documents({"store_id": s["id"], "deleted": {"$ne": True}})
+        s.update(await rating_summary(s["id"]))
     return stores
 
 
@@ -294,7 +310,8 @@ async def list_stores():
 async def get_store(store_id: str):
     s = await db.stores.find_one({"id": store_id, "deleted": {"$ne": True}}, {"_id": 0})
     if not s:
-        raise HTTPException(status_code=404, detail="Barraca não encontrada")
+        raise HTTPException(status_code=404, detail="Loja não encontrada")
+    s.update(await rating_summary(store_id))
     return s
 
 
@@ -313,7 +330,7 @@ async def create_store(body: StoreIn, user=Depends(require_role("admin"))):
 async def update_store(store_id: str, body: StoreIn, user=Depends(require_role("admin", "lojista"))):
     s = await db.stores.find_one({"id": store_id, "deleted": {"$ne": True}})
     if not s:
-        raise HTTPException(status_code=404, detail="Barraca não encontrada")
+        raise HTTPException(status_code=404, detail="Loja não encontrada")
     if user["role"] == "lojista" and user.get("store_id") != store_id:
         raise HTTPException(status_code=403, detail="Acesso negado")
     updates = {k: v for k, v in body.dict().items() if v is not None}
@@ -338,11 +355,32 @@ SORT_MAP = {"recent": ("created_at", -1), "name": ("name", 1),
 
 
 @api.get("/stores/{store_id}/products")
-async def store_products(store_id: str, sort: str = Query("recent")):
+async def store_products(store_id: str, sort: str = Query("recent"), category: str = Query("")):
     field, direction = SORT_MAP.get(sort, ("created_at", -1))
-    products = await db.products.find({"store_id": store_id, "deleted": {"$ne": True}},
-                                      {"_id": 0}).sort(field, direction).to_list(1000)
+    q = {"store_id": store_id, "deleted": {"$ne": True}}
+    if category and category != "Todos":
+        q["category"] = category
+    products = await db.products.find(q, {"_id": 0}).sort(field, direction).to_list(1000)
     return products
+
+
+@api.get("/stores/{store_id}/reviews")
+async def list_reviews(store_id: str):
+    revs = await db.reviews.find({"store_id": store_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    summary = await rating_summary(store_id)
+    return {"reviews": revs, **summary}
+
+
+@api.post("/stores/{store_id}/reviews")
+async def add_review(store_id: str, body: ReviewIn, user=Depends(get_current_user)):
+    if body.rating < 1 or body.rating > 5:
+        raise HTTPException(status_code=400, detail="Nota deve ser de 1 a 5")
+    doc = {"id": new_id("rev"), "store_id": store_id, "user_id": user["user_id"],
+           "user_name": user.get("name", ""), "rating": body.rating,
+           "comment": (body.comment or "").strip(), "created_at": now_iso()}
+    await db.reviews.update_one({"store_id": store_id, "user_id": user["user_id"]},
+                               {"$set": doc}, upsert=True)
+    return doc
 
 
 @api.post("/products")
@@ -391,8 +429,9 @@ async def extract_product(message: str, image_path: str = ""):
     system = (
         "Você extrai dados de produtos de mensagens de WhatsApp de feirantes brasileiros. "
         "Responda SOMENTE com JSON válido no formato: "
-        '{\"name\": string, \"price\": number, \"description\": string}. '
+        '{\"name\": string, \"price\": number, \"description\": string, \"category\": string}. '
         "price em reais (número, sem R$). Se não houver preço, use 0. "
+        "category deve ser UMA de: Frutas, Verduras, Legumes, Laticínios, Padaria, Bebidas, Carnes, Outros. "
         "name curto. description resumida. Nada além do JSON."
     )
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"ai-import-{uuid.uuid4().hex[:8]}",
@@ -421,7 +460,8 @@ async def extract_product(message: str, image_path: str = ""):
         raise HTTPException(status_code=502, detail="IA não retornou JSON válido")
     return {"name": str(data.get("name", "")).strip(),
             "price": float(data.get("price", 0) or 0),
-            "description": str(data.get("description", "")).strip()}
+            "description": str(data.get("description", "")).strip(),
+            "category": str(data.get("category", "Outros")).strip() or "Outros"}
 
 
 # ------------------------------------------------------------------ Orders
@@ -434,7 +474,7 @@ def order_public(o):
 async def create_order(body: OrderIn, user=Depends(get_current_user)):
     store = await db.stores.find_one({"id": body.store_id, "deleted": {"$ne": True}}, {"_id": 0})
     if not store:
-        raise HTTPException(status_code=404, detail="Barraca não encontrada")
+        raise HTTPException(status_code=404, detail="Loja não encontrada")
     total = round(sum(i.price * i.qty for i in body.items), 2)
     doc = {
         "id": new_id("order"), "token": uuid.uuid4().hex, "store_id": body.store_id,
@@ -538,8 +578,8 @@ def build_pdf(o):
     brand = colors.HexColor("#4A7C59")
     title = ParagraphStyle("t", parent=styles["Title"], textColor=brand, fontSize=22)
     h = ParagraphStyle("h", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#4A4C48"))
-    els = [Paragraph("Feira Online", title),
-           Paragraph(f"<b>Barraca:</b> {o['store_name']}", h),
+    els = [Paragraph("Lojas da Fronteira", title),
+           Paragraph(f"<b>Loja:</b> {o['store_name']}", h),
            Paragraph(f"<b>Cliente:</b> {o.get('customer_name','')}", h),
            Paragraph(f"<b>Pedido:</b> {o['id']}", h),
            Paragraph(f"<b>Status:</b> {o['status']}", h),
@@ -607,6 +647,7 @@ async def home():
         s["product_count"] = await db.products.count_documents(
             {"store_id": s["id"], "deleted": {"$ne": True}}
         )
+        s.update(await rating_summary(s["id"]))
     featured = [s for s in stores if s.get("featured")]
     if not featured:
         featured = stores[:6]
@@ -633,6 +674,7 @@ async def search(q: str = Query("")):
         s["product_count"] = await db.products.count_documents(
             {"store_id": s["id"], "deleted": {"$ne": True}}
         )
+        s.update(await rating_summary(s["id"]))
     active_ids = await db.stores.distinct("id", {"deleted": {"$ne": True}, "active": {"$ne": False}})
     all_stores = await db.stores.find({"id": {"$in": active_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
     smap = {s["id"]: s["name"] for s in all_stores}
@@ -671,7 +713,7 @@ async def send_order_whatsapp(body: SendWhatsApp, user=Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Pedido não encontrado")
     num = (o["store_whatsapp"] or "").replace(" ", "").replace("+", "")
     lines = "\n".join([f"• {i['qty']}x {i['name']} — R$ {i['price'] * i['qty']:.2f}" for i in o["items"]])
-    text = (f"*Novo pedido — Feira Online*\nCliente: {o.get('customer_name','')}\n\n{lines}\n\n"
+    text = (f"*Novo pedido — Lojas da Fronteira*\nCliente: {o.get('customer_name','')}\n\n{lines}\n\n"
             f"*Total: R$ {o['total']:.2f}*")
     result = await wa_send({"to": num, "type": "text", "text": {"body": text}})
     base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
@@ -749,6 +791,7 @@ async def _process_inbound(msg: dict):
     parsed = await extract_product(text, image_path)
     doc = {"id": new_id("prod"), "store_id": store["id"], "name": parsed["name"] or "Produto",
            "description": parsed["description"], "price": parsed["price"], "image": image_path,
+           "category": parsed.get("category", "Outros"),
            "deleted": False, "created_at": now_iso(), "source": "whatsapp"}
     await db.products.insert_one(doc)
     logger.info(f"WA product created for store {store['id']}: {doc['name']}")
@@ -767,6 +810,71 @@ async def _download_wa_media(media_id: str) -> str:
     path = f"{APP_NAME}/whatsapp/{uuid.uuid4().hex}.{ext}"
     await run_in_threadpool(put_object, path, blob.content, ct)
     return path
+
+
+# ------------------------------------------------------------------ Favorites
+@api.get("/my/favorite-ids")
+async def my_favorite_ids(user=Depends(get_current_user)):
+    favs = await db.favorites.find({"user_id": user["user_id"]}, {"_id": 0, "store_id": 1}).to_list(1000)
+    return [f["store_id"] for f in favs]
+
+
+@api.get("/my/favorites")
+async def my_favorites(user=Depends(get_current_user)):
+    favs = await db.favorites.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(1000)
+    ids = [f["store_id"] for f in favs]
+    stores = await db.stores.find({"id": {"$in": ids}, "deleted": {"$ne": True}}, {"_id": 0}).to_list(1000)
+    for s in stores:
+        s["product_count"] = await db.products.count_documents({"store_id": s["id"], "deleted": {"$ne": True}})
+        s.update(await rating_summary(s["id"]))
+    return stores
+
+
+@api.post("/favorites/{store_id}")
+async def add_favorite(store_id: str, user=Depends(get_current_user)):
+    await db.favorites.update_one(
+        {"user_id": user["user_id"], "store_id": store_id},
+        {"$set": {"user_id": user["user_id"], "store_id": store_id, "created_at": now_iso()}},
+        upsert=True)
+    return {"ok": True}
+
+
+@api.delete("/favorites/{store_id}")
+async def remove_favorite(store_id: str, user=Depends(get_current_user)):
+    await db.favorites.delete_one({"user_id": user["user_id"], "store_id": store_id})
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------ Vendor report
+@api.get("/vendor/report")
+async def vendor_report(user=Depends(require_role("lojista", "admin"))):
+    q = {"deleted": {"$ne": True}, "status": {"$ne": "cancelado"}}
+    if user["role"] == "lojista":
+        if not user.get("store_id"):
+            return {"daily": [], "weekly": [], "total": 0, "orders": 0}
+        q["store_id"] = user["store_id"]
+    orders = await db.orders.find(q, {"_id": 0, "total": 1, "created_at": 1}).to_list(10000)
+
+    def as_date(o):
+        try:
+            return datetime.fromisoformat(o["created_at"]).date()
+        except Exception:
+            return None
+
+    now = datetime.now(timezone.utc)
+    daily = []
+    for i in range(6, -1, -1):
+        day = (now - timedelta(days=i)).date()
+        total = sum(o["total"] for o in orders if as_date(o) == day)
+        daily.append({"label": day.strftime("%d/%m"), "value": round(total, 2)})
+    weekly = []
+    for w in range(3, -1, -1):
+        start = (now - timedelta(days=now.weekday() + 7 * w)).date()
+        end = start + timedelta(days=6)
+        total = sum(o["total"] for o in orders if as_date(o) and start <= as_date(o) <= end)
+        weekly.append({"label": start.strftime("%d/%m"), "value": round(total, 2)})
+    total_rev = round(sum(o["total"] for o in orders), 2)
+    return {"daily": daily, "weekly": weekly, "total": total_rev, "orders": len(orders)}
 
 
 @api.get("/")
@@ -790,6 +898,8 @@ async def startup():
         await db.stores.create_index("id", unique=True)
         await db.products.create_index("store_id")
         await db.orders.create_index("id", unique=True)
+        await db.reviews.create_index([("store_id", 1), ("user_id", 1)], unique=True)
+        await db.favorites.create_index([("user_id", 1), ("store_id", 1)], unique=True)
     except Exception as e:
         logger.warning(f"index error: {e}")
     try:
