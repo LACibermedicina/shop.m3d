@@ -218,7 +218,7 @@ export default function VendorCatalog() {
         testID="ai-message-input"
         value={aiMsg}
         onChangeText={setAiMsg}
-        placeholder="Ex: Tomate italiano fresquinho, R$ 8,90 o kg"
+        placeholder="Ex: Fone de ouvido Bluetooth, R$ 120,00, com microfone"
         multiline
       />
       <View style={styles.aiActions}>

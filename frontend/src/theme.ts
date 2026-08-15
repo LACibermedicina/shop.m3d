@@ -49,12 +49,16 @@ export const money = (n: number) =>
   `R$ ${Number(n || 0).toFixed(2).replace(".", ",")}`;
 
 export const CATEGORIES = [
-  "Frutas",
-  "Verduras",
-  "Legumes",
-  "Laticínios",
-  "Padaria",
+  "Eletrônicos",
+  "Informática",
+  "Celulares",
+  "Perfumaria",
+  "Moda",
+  "Calçados",
+  "Casa & Decoração",
+  "Brinquedos",
   "Bebidas",
-  "Carnes",
+  "Alimentos",
+  "Acessórios",
   "Outros",
 ];

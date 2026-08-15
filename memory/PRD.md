@@ -48,6 +48,11 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 - **Loja aberta/fechada (presença em tempo real)**: campos is_open/last_seen na loja; PUT /api/vendor/store/open (toggle) + POST /api/vendor/heartbeat (a cada 25s enquanto app ativo, via VendorOrdersProvider). `online` = is_open && heartbeat < 60s. Selo verde "Aberta"/cinza "Fechada" nos cards da home, favoritos, destaques e no hero da loja. Toggle no topo da tela Pedidos do lojista.
 - **Cupons de desconto**: coleção coupons (código único por loja, percent/fixed). POST /api/coupons, GET /api/vendor/coupons, DELETE /api/coupons/{id}, POST /api/coupons/apply. Lojista cria/gerencia via modal na tela Pedidos. Cliente aplica cupom por loja no carrinho (desconto + total recalculados). create_order aplica cupom (subtotal/discount/coupon_code/total); PDF e tela de pedido mostram desconto.
 
+### Iteração 5 (2026-08-15) — taxonomia de varejo + categoria editável pelo admin
+- **Categorias de lojas/varejo** (Tríplice Fronteira/Ciudad del Este) substituem as de feira de frutas: Eletrônicos, Informática, Celulares, Perfumaria, Moda, Calçados, Casa & Decoração, Brinquedos, Bebidas, Alimentos, Acessórios, Outros.
+- **IA** classifica automaticamente cada produto nessas categorias (prompt atualizado).
+- **Edição da categoria**: lojista altera no cadastro do produto (chips) e **admin** altera pelo novo gerenciador de produtos (ícone de etiqueta no card da loja → modal lista produtos com chips de categoria + excluir). Backend permite update de produto por lojista dono e por admin.
+
 ## Backlog
 - P1: Ativar WhatsApp Cloud API quando o usuário fornecer credenciais (código pronto, dormente).
 - P2: Filtro de categoria também na home; ordenação por avaliação; validade/limite de uso nos cupons.

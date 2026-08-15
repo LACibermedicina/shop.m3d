@@ -464,11 +464,14 @@ async def ai_import(body: AIImportReq, user=Depends(require_role("admin", "lojis
 async def extract_product(message: str, image_path: str = ""):
     from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
     system = (
-        "Você extrai dados de produtos de mensagens de WhatsApp de feirantes brasileiros. "
+        "Você extrai dados de produtos de mensagens de WhatsApp de lojistas da Tríplice Fronteira "
+        "(comércio varejista de Foz do Iguaçu / Ciudad del Este). "
         "Responda SOMENTE com JSON válido no formato: "
         '{\"name\": string, \"price\": number, \"description\": string, \"category\": string}. '
         "price em reais (número, sem R$). Se não houver preço, use 0. "
-        "category deve ser UMA de: Frutas, Verduras, Legumes, Laticínios, Padaria, Bebidas, Carnes, Outros. "
+        "category deve ser UMA de: Eletrônicos, Informática, Celulares, Perfumaria, Moda, "
+        "Calçados, Casa & Decoração, Brinquedos, Bebidas, Alimentos, Acessórios, Outros. "
+        "Escolha a categoria de varejo que melhor descreve o produto. "
         "name curto. description resumida. Nada além do JSON."
     )
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"ai-import-{uuid.uuid4().hex[:8]}",

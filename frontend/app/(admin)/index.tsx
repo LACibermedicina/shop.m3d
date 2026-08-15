@@ -17,14 +17,46 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, fileUrl, uploadImage } from "@/src/api";
 import { pickImage, openAppSettings } from "@/src/imagePicker";
-import { Loading, EmptyState, ErrorState, Button, Field, useToast } from "@/src/ui";
-import { colors, spacing, radius, font, shadow } from "@/src/theme";
+import { Loading, EmptyState, ErrorState, Button, Field, Chip, useToast } from "@/src/ui";
+import { colors, spacing, radius, font, shadow, money, CATEGORIES } from "@/src/theme";
 
 export default function AdminStores() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const [stores, setStores] = useState<any[]>([]);
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
+
+  // product/category manager
+  const [prodStore, setProdStore] = useState<any>(null);
+  const [prods, setProds] = useState<any[]>([]);
+
+  const openProducts = async (s: any) => {
+    setProdStore(s);
+    setProds([]);
+    try {
+      setProds(await api.products(s.id));
+    } catch {}
+  };
+
+  const setCat = async (p: any, cat: string) => {
+    try {
+      const u = await api.updateProduct(p.id, { category: cat });
+      setProds((prev) => prev.map((x) => (x.id === p.id ? u : x)));
+      toast("Categoria atualizada", "success");
+    } catch {
+      toast("Falha ao atualizar", "error");
+    }
+  };
+
+  const delProd = async (p: any) => {
+    try {
+      await api.deleteProduct(p.id);
+      setProds((prev) => prev.filter((x) => x.id !== p.id));
+      toast("Produto removido", "success");
+    } catch {
+      toast("Falha ao remover", "error");
+    }
+  };
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -157,6 +189,9 @@ export default function AdminStores() {
                 </Text>
                 <Text style={styles.meta}>{item.product_count || 0} produtos</Text>
               </View>
+              <Pressable testID={`manage-products-${item.id}`} onPress={() => openProducts(item)} style={styles.iconBtn}>
+                <Ionicons name="pricetags-outline" size={20} color={colors.onSurfaceTertiary} />
+              </Pressable>
               <Pressable testID={`edit-store-${item.id}`} onPress={() => openEdit(item)} style={styles.iconBtn}>
                 <Ionicons name="create-outline" size={20} color={colors.brandPrimary} />
               </Pressable>
@@ -171,6 +206,51 @@ export default function AdminStores() {
       <Pressable testID="add-store-fab" onPress={openNew} style={[styles.fab, { bottom: insets.bottom + spacing.lg }]}>
         <Ionicons name="add" size={28} color="#fff" />
       </Pressable>
+
+      <Modal visible={!!prodStore} transparent animationType="slide" onRequestClose={() => setProdStore(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalTitleRow}>
+              <Text style={styles.modalTitle} numberOfLines={1}>Produtos — {prodStore?.name}</Text>
+              <Pressable testID="close-products" onPress={() => setProdStore(null)}>
+                <Ionicons name="close" size={24} color={colors.onSurfaceTertiary} />
+              </Pressable>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              {prods.length === 0 ? (
+                <Text style={styles.emptyProd}>Nenhum produto nesta loja.</Text>
+              ) : (
+                prods.map((p) => (
+                  <View key={p.id} style={styles.adminProd} testID={`admin-prod-${p.id}`}>
+                    <View style={styles.adminProdTop}>
+                      <Image source={{ uri: fileUrl(p.image) || undefined }} style={styles.adminProdImg} contentFit="cover" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.adminProdName} numberOfLines={1}>{p.name}</Text>
+                        <Text style={styles.adminProdPrice}>{money(p.price)}</Text>
+                      </View>
+                      <Pressable testID={`admin-del-prod-${p.id}`} onPress={() => delProd(p)} style={styles.iconBtn}>
+                        <Ionicons name="trash-outline" size={18} color={colors.error} />
+                      </Pressable>
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catScroll}>
+                      {CATEGORIES.map((c) => (
+                        <Chip
+                          key={c}
+                          testID={`admin-cat-${p.id}-${c}`}
+                          label={c}
+                          active={(p.category || "Outros") === c}
+                          onPress={() => setCat(p, c)}
+                        />
+                      ))}
+                    </ScrollView>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={formOpen} transparent animationType="slide" onRequestClose={() => setFormOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalOverlay}>
@@ -289,6 +369,19 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   logoPickInner: { width: "100%", height: "100%" },
+  emptyProd: { fontSize: font.base, color: colors.onSurfaceTertiary, paddingVertical: spacing.lg, textAlign: "center" },
+  adminProd: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    ...shadow.card,
+  },
+  adminProdTop: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  adminProdImg: { width: 44, height: 44, borderRadius: radius.sm, backgroundColor: colors.surfaceTertiary },
+  adminProdName: { fontSize: font.base, fontWeight: "700", color: colors.onSurface },
+  adminProdPrice: { fontSize: font.sm, color: colors.brandPrimary, fontWeight: "700", marginTop: 2 },
+  catScroll: { gap: spacing.sm, paddingTop: spacing.md },
   logoPickText: { fontSize: font.base, color: colors.brandPrimary, fontWeight: "600", marginTop: 4 },
   switchRow: {
     flexDirection: "row",
