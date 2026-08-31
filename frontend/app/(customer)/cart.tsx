@@ -40,6 +40,7 @@ export default function Cart() {
   const [couponInput, setCouponInput] = useState<Record<string, string>>({});
   const [applied, setApplied] = useState<Record<string, { code: string; discount: number }>>({});
   const [applying, setApplying] = useState<string>("");
+  const [custWhats, setCustWhats] = useState("");
 
   const applyCoupon = async (storeId: string, subtotal: number) => {
     const code = (couponInput[storeId] || "").trim();
@@ -124,6 +125,7 @@ export default function Cart() {
             qty: i.qty,
           })),
           coupon_code: applied[storeId]?.code || "",
+          customer_whatsapp: custWhats.trim(),
         });
         results.push({
           id: order.id,
@@ -253,6 +255,15 @@ export default function Cart() {
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+        <TextInput
+          testID="customer-whatsapp-input"
+          value={custWhats}
+          onChangeText={setCustWhats}
+          placeholder="Seu WhatsApp p/ confirmação (opcional)"
+          placeholderTextColor={colors.muted}
+          keyboardType="phone-pad"
+          style={styles.custWhatsInput}
+        />
         {totalDiscount > 0 && (
           <View style={styles.discountRow}>
             <Text style={styles.discountLabel}>Descontos</Text>
@@ -280,7 +291,7 @@ export default function Cart() {
               <Ionicons name="checkmark-circle" size={44} color={colors.success} />
             </View>
             <Text style={styles.modalTitle}>Pedido criado!</Text>
-            <Text style={styles.modalSub}>Envie a lista ao lojista pelo WhatsApp.</Text>
+            <Text style={styles.modalSub}>Confirmação enviada a você, ao lojista e ao administrador.</Text>
             {created?.map((o) => (
               <View key={o.id} style={styles.orderRow}>
                 <View style={{ flex: 1 }}>
@@ -394,6 +405,17 @@ const styles = StyleSheet.create({
   },
   couponAppliedText: { flex: 1, fontSize: font.base, fontWeight: "700", color: colors.onBrandTertiary },
   discountRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.xs },
+  custWhatsInput: {
+    height: 44,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    color: colors.onSurface,
+    fontSize: font.base,
+    backgroundColor: colors.surface,
+    marginBottom: spacing.md,
+  },
   discountLabel: { fontSize: font.base, color: colors.success },
   discountValue: { fontSize: font.base, fontWeight: "700", color: colors.success },
   footer: {

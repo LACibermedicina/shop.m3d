@@ -53,8 +53,14 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 - **IA** classifica automaticamente cada produto nessas categorias (prompt atualizado).
 - **Edição da categoria**: lojista altera no cadastro do produto (chips) e **admin** altera pelo novo gerenciador de produtos (ícone de etiqueta no card da loja → modal lista produtos com chips de categoria + excluir). Backend permite update de produto por lojista dono e por admin.
 
+### Iteração 6 (deploy + notificações)
+- **Correções de deploy**: httpx no requirements; dev-login server-gated (ALLOW_DEV_LOGIN) e segredo removido do bundle; exclusão de conta (DELETE /api/auth/me).
+- **Login em 2 modos**: Cliente vs Lojista/Administrador (segmentado); acesso definido pelo role.
+- **Notificações de pedido (modo teste)**: criar pedido e cada mudança de status notifica Lojista + Administrador (WhatsApp SIMULADO) e Cliente (WhatsApp se informado, senão e-mail real via Resend). Novos campos: store.admin_whatsapp, order.customer_whatsapp; ROOT_WHATSAPP=11920946954 fallback. Painel "Avisos enviados" no pedido; confirmação no app após a compra.
+
 ## Backlog
-- P1: Ativar WhatsApp Cloud API quando o usuário fornecer credenciais (código pronto, dormente).
+- FASE GRANDE (próxima): CRUD por WhatsApp via número root (11920946954) — cadastrar/atualizar/desativar itens por mensagem, PDF de catálogo sob demanda, busca por similaridade (imagem/descrição), carrinho via WhatsApp, biblioteca de itens/carrinhos obsoletos p/ análise. Depende do WhatsApp Cloud API AO VIVO (webhook público) — ativar após deploy + credenciais Meta.
+- P1: Ativar WhatsApp Cloud API (envios reais substituem o modo simulado automaticamente).
 - P2: Filtro de categoria também na home; ordenação por avaliação; validade/limite de uso nos cupons.
 - P2: Desabilitar dev-login em produção (EXPO_PUBLIC_ENABLE_DEV_LOGIN=false).
 - P2: Filtro de categoria também na home; ordenação por avaliação; favoritos offline.

@@ -1,9 +1,10 @@
-import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
+import { useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Pressable, Modal } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/src/auth";
-import { Avatar, Button } from "@/src/ui";
+import { Avatar, Button, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow } from "@/src/theme";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -13,13 +14,30 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export function ProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, deleteAccount } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const doLogout = async () => {
     await logout();
     router.replace("/login");
+  };
+
+  const doDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      toast("Conta excluída", "success");
+      router.replace("/login");
+    } catch {
+      toast("Falha ao excluir conta", "error");
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
   };
 
   return (
@@ -48,7 +66,27 @@ export function ProfileScreen() {
 
         <View style={{ height: spacing.xl }} />
         <Button title="Sair" icon="log-out-outline" variant="danger" onPress={doLogout} testID="logout-button" />
+        <Pressable testID="delete-account-button" onPress={() => setConfirmDelete(true)} style={styles.deleteLink}>
+          <Ionicons name="trash-outline" size={16} color={colors.error} />
+          <Text style={styles.deleteText}>Excluir minha conta</Text>
+        </Pressable>
       </ScrollView>
+
+      <Modal visible={confirmDelete} transparent animationType="fade" onRequestClose={() => setConfirmDelete(false)}>
+        <View style={styles.overlay}>
+          <View style={styles.confirmCard}>
+            <Ionicons name="warning-outline" size={40} color={colors.error} />
+            <Text style={styles.confirmTitle}>Excluir conta?</Text>
+            <Text style={styles.confirmMsg}>
+              Esta ação é permanente. Seus favoritos e avaliações serão removidos. Não é possível desfazer.
+            </Text>
+            <Button title="Excluir permanentemente" variant="danger" onPress={doDelete} loading={deleting} testID="confirm-delete-button" />
+            <Pressable testID="cancel-delete-button" onPress={() => setConfirmDelete(false)} style={{ paddingVertical: spacing.md }}>
+              <Text style={styles.cancelText}>Cancelar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -89,4 +127,25 @@ const styles = StyleSheet.create({
   },
   infoLabel: { fontSize: font.base, color: colors.onSurfaceTertiary },
   infoValue: { fontSize: font.base, color: colors.onSurface, flex: 1, textAlign: "right", fontWeight: "600" },
+  deleteLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  deleteText: { color: colors.error, fontSize: font.base, fontWeight: "600" },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  confirmCard: {
+    width: "100%",
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  confirmTitle: { fontSize: font.xl, fontWeight: "800", color: colors.onSurface },
+  confirmMsg: { fontSize: font.base, color: colors.onSurfaceTertiary, textAlign: "center", marginBottom: spacing.md },
+  cancelText: { fontSize: font.base, color: colors.onSurfaceTertiary, fontWeight: "600", textAlign: "center" },
 });

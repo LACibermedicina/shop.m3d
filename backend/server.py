@@ -31,6 +31,7 @@ db = client[os.environ['DB_NAME']]
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 DEV_LOGIN_SECRET = os.environ.get("DEV_LOGIN_SECRET", "")
+ALLOW_DEV_LOGIN = os.environ.get("ALLOW_DEV_LOGIN", "").strip().lower() == "true"
 ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
 
 # WhatsApp Cloud API (optional — dormant until configured)
@@ -42,6 +43,10 @@ WA_API_VERSION = os.environ.get("WA_API_VERSION", "v25.0").strip()
 WA_CONFIGURED = bool(WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID)
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
 ONLINE_WINDOW = 60  # segundos sem heartbeat até a loja ser considerada offline
+ROOT_WHATSAPP = os.environ.get("ROOT_WHATSAPP", "").strip()
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+EMERGENT_EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Lojas da Fronteira")
 
 # ------------------------------------------------------------------ Storage
 STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
@@ -104,6 +109,7 @@ class StoreIn(BaseModel):
     description: Optional[str] = ""
     logo: Optional[str] = ""
     whatsapp: str
+    admin_whatsapp: Optional[str] = ""
     owner_user_id: Optional[str] = None
     featured: Optional[bool] = False
 
@@ -153,6 +159,7 @@ class OrderIn(BaseModel):
     customer_name: Optional[str] = ""
     notes: Optional[str] = ""
     coupon_code: Optional[str] = ""
+    customer_whatsapp: Optional[str] = ""
 
 
 class StoreOpen(BaseModel):
@@ -253,8 +260,9 @@ async def auth_session(body: SessionReq):
 
 
 @api.post("/auth/dev-login")
-async def dev_login(body: DevLogin, x_dev_secret: Optional[str] = Header(None)):
-    if not DEV_LOGIN_SECRET or x_dev_secret != DEV_LOGIN_SECRET:
+async def dev_login(body: DevLogin):
+    # Server-only gate. Disabled in production unless ALLOW_DEV_LOGIN=true.
+    if not ALLOW_DEV_LOGIN:
         raise HTTPException(status_code=403, detail="Dev login desabilitado")
     if body.role not in ("admin", "lojista", "cliente"):
         raise HTTPException(status_code=400, detail="Role inválida")
@@ -282,6 +290,16 @@ async def logout(authorization: Optional[str] = Header(None)):
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1].strip()
         await db.user_sessions.delete_many({"session_token": token})
+    return {"ok": True}
+
+
+@api.delete("/auth/me")
+async def delete_account(user=Depends(get_current_user)):
+    uid = user["user_id"]
+    await db.user_sessions.delete_many({"user_id": uid})
+    await db.favorites.delete_many({"user_id": uid})
+    await db.reviews.delete_many({"user_id": uid})
+    await db.users.delete_one({"user_id": uid})
     return {"ok": True}
 
 
@@ -533,10 +551,19 @@ async def create_order(body: OrderIn, user=Depends(get_current_user)):
         "customer_name": body.customer_name or user.get("name", ""),
         "items": [i.dict() for i in body.items], "subtotal": subtotal,
         "discount": discount, "coupon_code": coupon_code, "total": total, "notes": body.notes,
+        "customer_whatsapp": (body.customer_whatsapp or "").strip(),
         "status": "novo", "editable": True, "deleted": False, "created_at": now_iso(),
     }
     await db.orders.insert_one(doc)
     doc.pop("_id", None)
+    if body.customer_whatsapp:
+        await db.users.update_one({"user_id": user["user_id"]},
+                                  {"$set": {"whatsapp": body.customer_whatsapp.strip()}})
+    try:
+        await notify_order(doc, "created")
+    except Exception as e:
+        logger.warning(f"notify_order created failed: {e}")
+    doc["confirmation"] = "Pedido criado! Avisos enviados ao lojista, administrador e a você."
     return doc
 
 
@@ -602,7 +629,12 @@ async def update_order_status(order_id: str, body: StatusUpdate, user=Depends(re
         raise HTTPException(status_code=403, detail="Acesso negado")
     editable = body.status in ("novo", "editando")
     await db.orders.update_one({"id": order_id}, {"$set": {"status": body.status, "editable": editable}})
-    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    try:
+        await notify_order(updated, "status")
+    except Exception as e:
+        logger.warning(f"notify_order status failed: {e}")
+    return updated
 
 
 @api.get("/orders/{order_id}/pdf")
@@ -1026,6 +1058,157 @@ async def apply_coupon(body: CouponApply, user=Depends(get_current_user)):
     return {"valid": True, "code": coupon["code"], "type": coupon["type"],
             "value": coupon["value"], "discount": discount,
             "total": round(max(body.subtotal - discount, 0), 2)}
+
+
+# ------------------------------------------------------------------ Notifications (WhatsApp sim + Email real)
+import ipaddress
+from html import escape
+from html.parser import HTMLParser
+from urllib.parse import urlparse
+
+_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
+
+
+def _host_ok(host: str) -> bool:
+    if not host or "xn--" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host == s or host.endswith("." + s) for s in _SHORTENERS)
+
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags, self.urls = set(), []
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag.lower())
+        self.urls += [v for k, v in attrs if k.lower() in ("href", "src") and v]
+
+
+def _assert_safe_email(subject: str, html: str) -> None:
+    scan = _EmailScan(); scan.feed(html)
+    if scan.tags & {"form", "input", "textarea", "select"}:
+        raise ValueError("No forms in email")
+    for url in scan.urls:
+        low = url.strip().lower()
+        if low.startswith(("mailto:", "tel:", "cid:", "#")):
+            continue
+        if not low.startswith("https://"):
+            raise ValueError("Email links must be absolute https")
+        host = urlparse(low).hostname or ""
+        if not _host_ok(host) or urlparse(low).username is not None:
+            raise ValueError("Unsafe URL in email")
+
+
+async def send_email(*, to: str, subject: str, html: str) -> Optional[str]:
+    if not EMERGENT_EMAIL_KEY:
+        return None
+    _assert_safe_email(subject, html)
+    payload = {"to": [to], "subject": subject, "html": html, "from_name": EMAIL_FROM_NAME}
+    async with httpx.AsyncClient(timeout=30) as hc:
+        resp = await hc.post(f"{EMAIL_BASE_URL}/api/v1/email/send",
+                             headers={"X-Email-Key": EMERGENT_EMAIL_KEY}, json=payload)
+    resp.raise_for_status()
+    return resp.json().get("id")
+
+
+def _order_lines(o):
+    return "\n".join([f"- {i['qty']}x {i['name']} (R$ {i['price'] * i['qty']:.2f})" for i in o["items"]])
+
+
+def _order_link(o):
+    base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
+    return f"{base}/api/orders/{o['id']}/pdf?token={o['token']}" if base else ""
+
+
+async def _record(order_id, target, channel, to, body, status, subject=""):
+    await db.notifications.insert_one({
+        "id": new_id("ntf"), "order_id": order_id, "target": target, "channel": channel,
+        "to": to, "subject": subject, "body": body, "status": status, "created_at": now_iso(),
+    })
+
+
+async def _wa_or_sim(order_id, target, to, body):
+    if not to:
+        return
+    if WA_CONFIGURED:
+        try:
+            await wa_send({"to": to.replace(" ", "").replace("+", ""), "type": "text", "text": {"body": body}})
+            await _record(order_id, target, "whatsapp", to, body, "sent")
+            return
+        except Exception as e:
+            logger.warning(f"WA notify failed: {e}")
+    await _record(order_id, target, "whatsapp", to, body, "simulated")
+
+
+async def notify_order(o, kind):
+    """kind: 'created' | 'status'. Notifica lojista + admin (WhatsApp) e cliente (WhatsApp ou e-mail)."""
+    store = await db.stores.find_one({"id": o["store_id"]}, {"_id": 0}) or {}
+    link = _order_link(o)
+    link_txt = f"\nLink do pedido (PDF): {link}" if link else ""
+    if kind == "created":
+        head = f"🆕 Novo pedido — {o['store_name']}"
+    else:
+        head = f"🔔 Pedido atualizado ({o.get('status','')}) — {o['store_name']}"
+    base_body = (f"{head}\nCliente: {o.get('customer_name','')}\n{_order_lines(o)}\n"
+                 f"Total: R$ {o['total']:.2f}{link_txt}")
+    # Lojista
+    await _wa_or_sim(o["id"], "lojista", store.get("whatsapp", ""), base_body)
+    # Administrador responsável (whatsapp da loja) ou root
+    admin_to = store.get("admin_whatsapp") or ROOT_WHATSAPP
+    await _wa_or_sim(o["id"], "admin", admin_to, base_body)
+    # Cliente: WhatsApp se houver, senão e-mail
+    cust_wa = o.get("customer_whatsapp") or ""
+    if kind == "created":
+        cust_body = (f"✅ Pedido confirmado em {o['store_name']}!\n{_order_lines(o)}\n"
+                     f"Total: R$ {o['total']:.2f}{link_txt}\nObrigado pela compra!")
+        subj = "Seu pedido foi confirmado — Lojas da Fronteira"
+    else:
+        cust_body = (f"🔔 Seu pedido em {o['store_name']} agora está: {o.get('status','')}.{link_txt}")
+        subj = f"Atualização do seu pedido ({o.get('status','')}) — Lojas da Fronteira"
+    if cust_wa:
+        await _wa_or_sim(o["id"], "cliente", cust_wa, cust_body)
+    else:
+        email = None
+        u = await db.users.find_one({"user_id": o["customer_user_id"]}, {"_id": 0, "email": 1})
+        email = (u or {}).get("email")
+        if email:
+            link_html = (f'<p><a href="{escape(link)}">Ver pedido (PDF)</a></p>' if link else "")
+            html = (f'<table role="presentation" width="100%"><tr><td style="padding:24px;'
+                    f'font-family:Arial,sans-serif;color:#1A1C19">'
+                    f'<h2 style="color:#4A7C59;margin:0 0 12px">{escape(subj)}</h2>'
+                    f'<p>Olá {escape(o.get("customer_name","") or "cliente")},</p>'
+                    f'<p>{escape(cust_body)}</p>{link_html}'
+                    f'<p style="font-size:12px;color:#888">Enviado por {escape(EMAIL_FROM_NAME)}. '
+                    f'Nunca pedimos senha ou dados de cartão por e-mail.</p></td></tr></table>')
+            try:
+                await send_email(to=email, subject=subj, html=html)
+                await _record(o["id"], "cliente", "email", email, cust_body, "sent", subj)
+            except Exception as e:
+                logger.warning(f"Email notify failed: {e}")
+                await _record(o["id"], "cliente", "email", email, cust_body, "failed", subj)
+
+
+@api.get("/orders/{order_id}/notifications")
+async def order_notifications(order_id: str, token: Optional[str] = Query(None),
+                              authorization: Optional[str] = Header(None)):
+    o = await db.orders.find_one({"id": order_id, "deleted": {"$ne": True}}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+    allowed = bool(token and token == o["token"])
+    if not allowed and authorization and authorization.startswith("Bearer "):
+        sess = await db.user_sessions.find_one({"session_token": authorization.split(" ", 1)[1].strip()}, {"_id": 0})
+        if sess:
+            u = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+            allowed = u and (u["role"] == "admin" or u["user_id"] == o["customer_user_id"]
+                             or (u["role"] == "lojista" and u.get("store_id") == o["store_id"]))
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    return await db.notifications.find({"order_id": order_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
 
 
 @api.get("/")

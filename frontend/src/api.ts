@@ -85,13 +85,15 @@ export const api = {
   logout: () => apiRequest("/auth/logout", { method: "POST" }),
   session: (session_id: string) =>
     apiRequest("/auth/session", { method: "POST", body: { session_id }, auth: false }),
-  devLogin: (email: string, role: string, secret: string) =>
+  devLogin: (email: string, role: string) =>
     apiRequest("/auth/dev-login", {
       method: "POST",
       body: { email, role, name: email.split("@")[0] },
       auth: false,
-      headers: { "X-Dev-Secret": secret },
     }),
+  deleteAccount: () => apiRequest("/auth/me", { method: "DELETE" }),
+  orderNotifications: (id: string, token?: string) =>
+    apiRequest(`/orders/${id}/notifications${token ? `?token=${token}` : ""}`),
 
   stores: () => apiRequest("/stores", { auth: false }),
   home: () => apiRequest("/home", { auth: false }),

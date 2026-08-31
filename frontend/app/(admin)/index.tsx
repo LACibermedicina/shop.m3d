@@ -63,6 +63,7 @@ export default function AdminStores() {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [whats, setWhats] = useState("");
+  const [adminWhats, setAdminWhats] = useState("");
   const [logoPath, setLogoPath] = useState("");
   const [logoUri, setLogoUri] = useState("");
   const [featured, setFeatured] = useState(false);
@@ -89,6 +90,7 @@ export default function AdminStores() {
     setName("");
     setDesc("");
     setWhats("");
+    setAdminWhats("");
     setLogoPath("");
     setLogoUri("");
     setFeatured(false);
@@ -100,6 +102,7 @@ export default function AdminStores() {
     setName(s.name);
     setDesc(s.description || "");
     setWhats(s.whatsapp || "");
+    setAdminWhats(s.admin_whatsapp || "");
     setLogoPath(s.logo || "");
     setLogoUri("");
     setFeatured(!!s.featured);
@@ -136,7 +139,7 @@ export default function AdminStores() {
     }
     setSaving(true);
     try {
-      const body = { name, description: desc, whatsapp: whats, logo: logoPath, featured };
+      const body = { name, description: desc, whatsapp: whats, admin_whatsapp: adminWhats, logo: logoPath, featured };
       if (editing) await api.updateStore(editing.id, body);
       else await api.createStore(body);
       setFormOpen(false);
@@ -281,6 +284,14 @@ export default function AdminStores() {
                 value={whats}
                 onChangeText={setWhats}
                 placeholder="Ex: 5511999999999"
+                keyboardType="phone-pad"
+              />
+              <Field
+                testID="store-admin-whatsapp"
+                label="WhatsApp do administrador (recebe cópias)"
+                value={adminWhats}
+                onChangeText={setAdminWhats}
+                placeholder="Ex: 5511920946954"
                 keyboardType="phone-pad"
               />
               <View style={styles.switchRow}>

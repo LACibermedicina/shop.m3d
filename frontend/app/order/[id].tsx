@@ -31,6 +31,7 @@ export default function OrderDetail() {
   const { user } = useAuth();
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [notifs, setNotifs] = useState<any[]>([]);
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [saving, setSaving] = useState(false);
 
@@ -39,6 +40,9 @@ export default function OrderDetail() {
       const o = await api.order(id, token);
       setOrder(o);
       setItems(o.items);
+      try {
+        setNotifs(await api.orderNotifications(id, token));
+      } catch {}
       setState("done");
     } catch {
       setState("error");
@@ -190,6 +194,26 @@ export default function OrderDetail() {
         )}
 
         <View style={{ height: spacing.lg }} />
+        {notifs.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Avisos enviados</Text>
+            {notifs.map((n, i) => (
+              <View key={i} style={styles.notifRow} testID={`notif-${i}`}>
+                <Ionicons
+                  name={n.channel === "email" ? "mail-outline" : "logo-whatsapp"}
+                  size={16}
+                  color={n.channel === "email" ? colors.brandSecondary : "#25D366"}
+                />
+                <Text style={styles.notifText} numberOfLines={1}>
+                  {n.target} • {n.to || "—"}
+                </Text>
+                <Text style={[styles.notifStatus, { color: n.status === "sent" ? colors.success : n.status === "failed" ? colors.error : colors.warning }]}>
+                  {n.status === "sent" ? "enviado" : n.status === "failed" ? "falhou" : "simulado"}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
         <Button title="Abrir PDF do pedido" icon="document-text-outline" variant="outline" onPress={openPdf} testID="open-pdf-button" />
       </ScrollView>
     </View>
@@ -251,6 +275,9 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: font.lg, color: colors.onSurfaceTertiary },
   totalValue: { fontSize: font.xl, fontWeight: "800", color: colors.brandPrimary },
   couponNote: { fontSize: font.sm, color: colors.success, marginTop: spacing.xs, fontWeight: "600" },
+  notifRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.divider },
+  notifText: { flex: 1, fontSize: font.sm, color: colors.onSurfaceTertiary },
+  notifStatus: { fontSize: font.sm, fontWeight: "700" },
   statusRow: { gap: spacing.sm, paddingBottom: spacing.md },
   statusChip: {
     height: 40,

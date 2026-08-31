@@ -31,6 +31,7 @@ export default function Login() {
   const [devOpen, setDevOpen] = useState(false);
   const [role, setRole] = useState("cliente");
   const [email, setEmail] = useState("cliente@feira.test");
+  const [mode, setMode] = useState<"cliente" | "merchant">("cliente");
 
   useEffect(() => {
     if (user) router.replace("/");
@@ -82,8 +83,41 @@ export default function Login() {
               <Text style={styles.brand}>Lojas da Fronteira</Text>
             </View>
             <Text style={styles.subtitle}>
-              Compre nas lojas da Tríplice Fronteira, sem sair de casa.
+              {mode === "cliente"
+                ? "Compre nas lojas da Tríplice Fronteira, sem sair de casa."
+                : "Área de lojistas e administradores da plataforma."}
             </Text>
+
+            <View style={styles.segment}>
+              <Pressable
+                testID="mode-cliente"
+                onPress={() => setMode("cliente")}
+                style={[styles.segmentItem, mode === "cliente" && styles.segmentActive]}
+              >
+                <Ionicons
+                  name="person-outline"
+                  size={16}
+                  color={mode === "cliente" ? "#fff" : colors.onSurfaceTertiary}
+                />
+                <Text style={[styles.segmentText, mode === "cliente" && styles.segmentTextActive]}>
+                  Cliente
+                </Text>
+              </Pressable>
+              <Pressable
+                testID="mode-merchant"
+                onPress={() => setMode("merchant")}
+                style={[styles.segmentItem, mode === "merchant" && styles.segmentActive]}
+              >
+                <Ionicons
+                  name="briefcase-outline"
+                  size={16}
+                  color={mode === "merchant" ? "#fff" : colors.onSurfaceTertiary}
+                />
+                <Text style={[styles.segmentText, mode === "merchant" && styles.segmentTextActive]}>
+                  Lojista / Admin
+                </Text>
+              </Pressable>
+            </View>
 
             <Pressable
               testID="google-signin-button"
@@ -92,8 +126,15 @@ export default function Login() {
               style={({ pressed }) => [styles.googleBtn, pressed && { opacity: 0.85 }]}
             >
               <Ionicons name="logo-google" size={20} color={colors.onSurface} />
-              <Text style={styles.googleText}>Entrar com Google</Text>
+              <Text style={styles.googleText}>
+                {mode === "cliente" ? "Entrar como cliente" : "Entrar como lojista/admin"}
+              </Text>
             </Pressable>
+            <Text style={styles.accessNote}>
+              {mode === "cliente"
+                ? "Seu acesso é identificado automaticamente ao entrar."
+                : "Acesso liberado apenas para contas de lojista ou administrador."}
+            </Text>
 
             {DEV_ENABLED && (
               <View style={styles.devBox}>
@@ -174,7 +215,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   brand: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
-  subtitle: { fontSize: font.lg, color: colors.onSurfaceTertiary, marginBottom: spacing.xl, lineHeight: 22 },
+  subtitle: { fontSize: font.lg, color: colors.onSurfaceTertiary, marginBottom: spacing.lg, lineHeight: 22 },
+  segment: {
+    flexDirection: "row",
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: radius.md,
+    padding: 4,
+    marginBottom: spacing.lg,
+    gap: 4,
+  },
+  segmentItem: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  segmentActive: { backgroundColor: colors.brandPrimary },
+  segmentText: { fontSize: font.base, fontWeight: "700", color: colors.onSurfaceTertiary },
+  segmentTextActive: { color: "#fff" },
+  accessNote: { fontSize: font.sm, color: colors.muted, marginTop: spacing.sm, textAlign: "center" },
   googleBtn: {
     height: 54,
     borderRadius: radius.md,

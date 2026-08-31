@@ -1,0 +1,43 @@
+{
+  "summary": "Backend: 25/25 pytest cases PASS on /app/backend/tests/test_feira_backend.py. Covered: (a) dev-login is now server-gated by ALLOW_DEV_LOGIN (NO X-Dev-Secret header sent) — returns session_token+user for cliente/lojista/admin; (b) DELETE /api/auth/me removes user, invalidates session (subsequent /auth/me = 401), and clears favorites/reviews for that user; (c) full regression — stores CRUD+RBAC, products CRUD across all 12 retail categories (Eletrônicos, Informática, Celulares, Perfumaria, Moda, Calçados, Casa & Decoração, Brinquedos, Bebidas, Alimentos, Acessórios, Outros), category filter, favorites add/remove/ids/list, reviews add/list+avg (aggregated review_count/avg_rating in list response), coupons create/list/apply/delete, order with coupon_code (subtotal 50, discount 5, total 45), PDF (application/pdf + %PDF magic), vendor store open/heartbeat + online flag, vendor report (7 daily + 4 weekly buckets), admin metrics/users/RBAC, upload+public files. Frontend: mobile viewport 390x844 — login screen renders segmented modes (mode-cliente, mode-merchant) and google button label switches between 'Entrar como cliente' and 'Entrar como lojista/admin'. dev-login-toggle opens role chips; dev-login for cliente, lojista and admin all successfully redirect to '/' and show the correct role stack (customer marketplace, vendor Catálogo/Pedidos/Vendas, admin Lojas/Usuários/Métricas). Profile → delete-account-button opens confirm modal (confirm-delete-button) → account deleted → back to /login. Login redirect bug from iteration 1 is FIXED. Console warnings: 'shadow* style props are deprecated. Use boxShadow' (from src/theme.ts) and 'props.pointerEvents is deprecated' (RN Web) — cosmetic, non-blocking.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/stores/{store_id}", "issue": "Store detail endpoint does not include rating summary (avg_rating/review_count). The list endpoint /api/stores/{store_id}/reviews already returns summary, so mobile clients can still get it — but for consistency, consider including rating_summary on GET /stores/{id} as well."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["RN Web warning: 'shadow*' style props are deprecated (from src/theme.ts shadow helper). Migrate to boxShadow.", "RN Web warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'."]}
+    ],
+    "react_native_issues": [
+      {"component": "src/theme.ts (shadow.*)", "issue": "Deprecated shadow* style props on RN Web. Migrate to boxShadow / use Platform.select. Reference: /app/frontend/src/theme.ts — emitted on every screen render."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_feira_backend.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Migrate src/theme.ts shadow helper to boxShadow (RN Web deprecation warnings) — cosmetic.",
+    "OPTIONAL: Include rating summary (avg_rating, review_count) in GET /api/stores/{store_id} for parity with list endpoint."
+  ],
+  "critical_code_review_comments": [
+    "server.py at 1078 lines — split into routes/{auth,stores,products,orders,coupons,vendor,admin,whatsapp}.py and services/{ai,storage,pdf}.py to stay under 700 lines/module.",
+    "DELETE /api/auth/me correctly removes sessions, favorites, reviews, and user document. Consider also soft-deleting or anonymizing orders authored by this user_id (currently orders remain — which is fine for merchant history/PDF, but document this behavior for the Apple review reply).",
+    "Dev-login server gating via ALLOW_DEV_LOGIN=true env var is correct and NO client secret is bundled anymore. In production, ensure ALLOW_DEV_LOGIN is unset/false AND EXPO_PUBLIC_ENABLE_DEV_LOGIN=false.",
+    "Login screen uses useEffect(() => { if (user) router.replace('/') }, [user]) — good, correctly resolves iteration-1 redirect bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_feira_backend.py"
+  ],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100% — login (2 modes), dev-login for cliente/lojista/admin routes, delete account flow, profile logout all verified"},
+  "seed_data_creation": "Created TEST_ stores/products/orders and TEST_ user accounts via automated tests. All prefixed with TEST_ for cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run backend suite: `cd /app && EXPO_PUBLIC_BACKEND_URL=<preview_url> python -m pytest backend/tests/test_feira_backend.py -v -n 0 --junitxml=/app/test_reports/pytest/pytest_results.xml`. Do NOT send X-Dev-Secret — ALLOW_DEV_LOGIN=true is the only server gate. For UI, log in via dev-login (mode is only cosmetic on web preview; dev section works from both modes). Delete account flow lives on /profile → delete-account-button → confirm-delete-button.",
+  "rca_of_issue": "N/A — all reviewed features (dev-login without secret, delete account, 2-mode login, role routing) verified working. Iteration-1 login redirect bug confirmed FIXED by the useEffect in login.tsx (lines 36-38)."
+}

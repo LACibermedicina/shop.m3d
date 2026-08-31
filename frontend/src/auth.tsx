@@ -22,6 +22,7 @@ type AuthCtx = {
   devLogin: (email: string, role: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx>(null as any);
@@ -128,10 +129,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [exchange]);
 
   const devLogin = useCallback(async (email: string, role: string) => {
-    const secret = process.env.EXPO_PUBLIC_DEV_LOGIN_SECRET || "";
-    const res = await api.devLogin(email, role, secret);
+    const res = await api.devLogin(email, role);
     await setToken(res.session_token);
     setUser(res.user);
+  }, []);
+
+  const deleteAccount = useCallback(async () => {
+    try {
+      await api.deleteAccount();
+    } catch {}
+    await setToken(null);
+    setUser(null);
   }, []);
 
   const logout = useCallback(async () => {
@@ -143,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={{ user, loading, loginGoogle, devLogin, logout, refresh }}>
+    <Ctx.Provider value={{ user, loading, loginGoogle, devLogin, logout, refresh, deleteAccount }}>
       {children}
     </Ctx.Provider>
   );
