@@ -13,6 +13,7 @@ export type User = {
   picture?: string;
   role: "admin" | "lojista" | "cliente";
   store_id?: string | null;
+  whatsapp?: string;
 };
 
 type AuthCtx = {

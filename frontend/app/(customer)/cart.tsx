@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { api, fileUrl } from "@/src/api";
 import { useCart, CartItem } from "@/src/cart";
+import { useAuth } from "@/src/auth";
 import { EmptyState, Button, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
 
@@ -33,6 +34,7 @@ export default function Cart() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { user } = useAuth();
   const { items, setQty, remove, clear, total, count } = useCart();
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<CreatedOrder[] | null>(null);
@@ -81,6 +83,10 @@ export default function Cart() {
   useEffect(() => {
     api.whatsappStatus().then((r) => setWaConfigured(!!r.configured)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (user?.whatsapp) setCustWhats(user.whatsapp);
+  }, [user?.whatsapp]);
 
   const sendOrder = async (o: CreatedOrder) => {
     if (waConfigured) {

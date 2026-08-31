@@ -980,11 +980,18 @@ async def set_store_open(body: StoreOpen, user=Depends(require_role("lojista")))
     sid = user.get("store_id")
     if not sid:
         raise HTTPException(status_code=400, detail="Nenhuma loja vinculada")
+    prev = await db.stores.find_one({"id": sid}, {"_id": 0, "is_open": 1})
+    was_open = bool((prev or {}).get("is_open"))
     updates = {"is_open": body.is_open}
     if body.is_open:
         updates["last_seen"] = now_iso()
     await db.stores.update_one({"id": sid}, {"$set": updates})
     s = await db.stores.find_one({"id": sid}, {"_id": 0})
+    if body.is_open and not was_open:
+        try:
+            await notify_store_open(s)
+        except Exception as e:
+            logger.warning(f"notify_store_open failed: {e}")
     s["online"] = store_online(s)
     return s
 
@@ -1125,24 +1132,25 @@ def _order_link(o):
     return f"{base}/api/orders/{o['id']}/pdf?token={o['token']}" if base else ""
 
 
-async def _record(order_id, target, channel, to, body, status, subject=""):
+async def _record(order_id, target, channel, to, body, status, subject="", store_id=""):
     await db.notifications.insert_one({
-        "id": new_id("ntf"), "order_id": order_id, "target": target, "channel": channel,
-        "to": to, "subject": subject, "body": body, "status": status, "created_at": now_iso(),
+        "id": new_id("ntf"), "order_id": order_id, "store_id": store_id, "target": target,
+        "channel": channel, "to": to, "subject": subject, "body": body, "status": status,
+        "created_at": now_iso(),
     })
 
 
-async def _wa_or_sim(order_id, target, to, body):
+async def _wa_or_sim(order_id, target, to, body, store_id=""):
     if not to:
         return
     if WA_CONFIGURED:
         try:
             await wa_send({"to": to.replace(" ", "").replace("+", ""), "type": "text", "text": {"body": body}})
-            await _record(order_id, target, "whatsapp", to, body, "sent")
+            await _record(order_id, target, "whatsapp", to, body, "sent", store_id=store_id)
             return
         except Exception as e:
             logger.warning(f"WA notify failed: {e}")
-    await _record(order_id, target, "whatsapp", to, body, "simulated")
+    await _record(order_id, target, "whatsapp", to, body, "simulated", store_id=store_id)
 
 
 async def notify_order(o, kind):
@@ -1157,10 +1165,10 @@ async def notify_order(o, kind):
     base_body = (f"{head}\nCliente: {o.get('customer_name','')}\n{_order_lines(o)}\n"
                  f"Total: R$ {o['total']:.2f}{link_txt}")
     # Lojista
-    await _wa_or_sim(o["id"], "lojista", store.get("whatsapp", ""), base_body)
+    await _wa_or_sim(o["id"], "lojista", store.get("whatsapp", ""), base_body, o["store_id"])
     # Administrador responsável (whatsapp da loja) ou root
     admin_to = store.get("admin_whatsapp") or ROOT_WHATSAPP
-    await _wa_or_sim(o["id"], "admin", admin_to, base_body)
+    await _wa_or_sim(o["id"], "admin", admin_to, base_body, o["store_id"])
     # Cliente: WhatsApp se houver, senão e-mail
     cust_wa = o.get("customer_whatsapp") or ""
     if kind == "created":
@@ -1171,7 +1179,7 @@ async def notify_order(o, kind):
         cust_body = (f"🔔 Seu pedido em {o['store_name']} agora está: {o.get('status','')}.{link_txt}")
         subj = f"Atualização do seu pedido ({o.get('status','')}) — Lojas da Fronteira"
     if cust_wa:
-        await _wa_or_sim(o["id"], "cliente", cust_wa, cust_body)
+        await _wa_or_sim(o["id"], "cliente", cust_wa, cust_body, o["store_id"])
     else:
         email = None
         u = await db.users.find_one({"user_id": o["customer_user_id"]}, {"_id": 0, "email": 1})
@@ -1187,10 +1195,32 @@ async def notify_order(o, kind):
                     f'Nunca pedimos senha ou dados de cartão por e-mail.</p></td></tr></table>')
             try:
                 await send_email(to=email, subject=subj, html=html)
-                await _record(o["id"], "cliente", "email", email, cust_body, "sent", subj)
+                await _record(o["id"], "cliente", "email", email, cust_body, "sent", subj, o["store_id"])
             except Exception as e:
                 logger.warning(f"Email notify failed: {e}")
-                await _record(o["id"], "cliente", "email", email, cust_body, "failed", subj)
+                await _record(o["id"], "cliente", "email", email, cust_body, "failed", subj, o["store_id"])
+
+
+async def notify_store_open(store):
+    favs = await db.favorites.find({"store_id": store["id"]}, {"_id": 0, "user_id": 1}).to_list(3000)
+    body = f"🟢 {store['name']} abriu agora! Aproveite para comprar."
+    subj = f"{store['name']} abriu agora — Lojas da Fronteira"
+    for f in favs:
+        u = await db.users.find_one({"user_id": f["user_id"]}, {"_id": 0, "whatsapp": 1, "email": 1})
+        if not u:
+            continue
+        if u.get("whatsapp"):
+            await _wa_or_sim(f"open_{store['id']}", "cliente", u["whatsapp"], body, store["id"])
+        elif u.get("email"):
+            html = (f'<table role="presentation" width="100%"><tr><td style="padding:24px;'
+                    f'font-family:Arial,sans-serif;color:#1A1C19"><h2 style="color:#4A7C59">'
+                    f'{escape(store["name"])} abriu agora!</h2>'
+                    f'<p>Sua loja favorita está aberta. Aproveite para comprar.</p></td></tr></table>')
+            try:
+                await send_email(to=u["email"], subject=subj, html=html)
+                await _record(f"open_{store['id']}", "cliente", "email", u["email"], body, "sent", subj, store["id"])
+            except Exception as e:
+                logger.warning(f"open notify email failed: {e}")
 
 
 @api.get("/orders/{order_id}/notifications")
@@ -1209,6 +1239,42 @@ async def order_notifications(order_id: str, token: Optional[str] = Query(None),
     if not allowed:
         raise HTTPException(status_code=403, detail="Acesso negado")
     return await db.notifications.find({"order_id": order_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+
+
+@api.post("/orders/{order_id}/resend")
+async def resend_order(order_id: str, user=Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id, "deleted": {"$ne": True}}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+    ok = (user["role"] == "admin" or user["user_id"] == o["customer_user_id"]
+          or (user["role"] == "lojista" and user.get("store_id") == o["store_id"]))
+    if not ok:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    await notify_order(o, "status")
+    return {"ok": True}
+
+
+@api.put("/auth/whatsapp")
+async def set_my_whatsapp(body: dict, user=Depends(get_current_user)):
+    wa = str(body.get("whatsapp", "")).strip()
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"whatsapp": wa}})
+    return await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+
+
+@api.get("/admin/notifications")
+async def admin_notifications(store_id: str = Query(""), status: str = Query(""),
+                              user=Depends(require_role("admin"))):
+    q = {}
+    if store_id:
+        q["store_id"] = store_id
+    if status:
+        q["status"] = status
+    notifs = await db.notifications.find(q, {"_id": 0}).sort("created_at", -1).to_list(300)
+    stores = await db.stores.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    smap = {s["id"]: s["name"] for s in stores}
+    for n in notifs:
+        n["store_name"] = smap.get(n.get("store_id", ""), "—")
+    return notifs
 
 
 @api.get("/")

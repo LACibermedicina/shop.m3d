@@ -4,7 +4,7 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
-import { Loading, ErrorState } from "@/src/ui";
+import { Loading, ErrorState, Chip } from "@/src/ui";
 import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
 
 const CARDS = [
@@ -18,18 +18,27 @@ const CARDS = [
 export default function AdminMetrics() {
   const insets = useSafeAreaInsets();
   const [metrics, setMetrics] = useState<any>(null);
+  const [notifs, setNotifs] = useState<any[]>([]);
+  const [nStatus, setNStatus] = useState("");
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [refreshing, setRefreshing] = useState(false);
+
+  const loadNotifs = useCallback(async (status = nStatus) => {
+    try {
+      setNotifs(await api.adminNotifications("", status));
+    } catch {}
+  }, [nStatus]);
 
   const load = useCallback(async () => {
     try {
       const data = await api.metrics();
       setMetrics(data);
+      await loadNotifs("");
       setState("done");
     } catch {
       setState("error");
     }
-  }, []);
+  }, [loadNotifs]);
 
   useFocusEffect(
     useCallback(() => {
@@ -76,6 +85,31 @@ export default function AdminMetrics() {
             </View>
           ))}
         </View>
+
+        <View style={styles.notifHeader}>
+          <Text style={styles.notifTitle}>Avisos enviados</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+          {[["", "Todos"], ["sent", "Enviados"], ["simulated", "Simulados"], ["failed", "Falhas"]].map(([v, l]) => (
+            <Chip key={v} testID={`notif-filter-${v || "all"}`} label={l} active={nStatus === v} onPress={() => { setNStatus(v); loadNotifs(v); }} />
+          ))}
+        </ScrollView>
+        {notifs.length === 0 ? (
+          <Text style={styles.notifEmpty}>Nenhum aviso ainda.</Text>
+        ) : (
+          notifs.slice(0, 60).map((n, i) => (
+            <View key={i} style={styles.notifCard} testID={`admin-notif-${i}`}>
+              <Ionicons name={n.channel === "email" ? "mail-outline" : "logo-whatsapp"} size={16} color={n.channel === "email" ? colors.brandSecondary : "#25D366"} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.notifStore} numberOfLines={1}>{n.store_name} • {n.target}</Text>
+                <Text style={styles.notifTo} numberOfLines={1}>{n.to || "—"}</Text>
+              </View>
+              <Text style={[styles.notifStat, { color: n.status === "sent" ? colors.success : n.status === "failed" ? colors.error : colors.warning }]}>
+                {n.status === "sent" ? "enviado" : n.status === "failed" ? "falhou" : "simulado"}
+              </Text>
+            </View>
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -116,4 +150,21 @@ const styles = StyleSheet.create({
   },
   cardValue: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
   cardLabel: { fontSize: font.base, color: colors.onSurfaceTertiary, marginTop: 2 },
+  notifHeader: { marginTop: spacing.xl, marginBottom: spacing.sm },
+  notifTitle: { fontSize: font.xl, fontWeight: "800", color: colors.onSurface },
+  filterRow: { gap: spacing.sm, paddingBottom: spacing.md },
+  notifEmpty: { fontSize: font.base, color: colors.onSurfaceTertiary, paddingVertical: spacing.md },
+  notifCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    ...shadow.card,
+  },
+  notifStore: { fontSize: font.base, fontWeight: "700", color: colors.onSurface },
+  notifTo: { fontSize: font.sm, color: colors.onSurfaceTertiary },
+  notifStat: { fontSize: font.sm, fontWeight: "700" },
 });

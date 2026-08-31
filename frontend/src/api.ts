@@ -94,6 +94,11 @@ export const api = {
   deleteAccount: () => apiRequest("/auth/me", { method: "DELETE" }),
   orderNotifications: (id: string, token?: string) =>
     apiRequest(`/orders/${id}/notifications${token ? `?token=${token}` : ""}`),
+  resendOrder: (id: string) => apiRequest(`/orders/${id}/resend`, { method: "POST" }),
+  setMyWhatsapp: (whatsapp: string) =>
+    apiRequest("/auth/whatsapp", { method: "PUT", body: { whatsapp } }),
+  adminNotifications: (storeId = "", status = "") =>
+    apiRequest(`/admin/notifications?store_id=${encodeURIComponent(storeId)}&status=${encodeURIComponent(status)}`),
 
   stores: () => apiRequest("/stores", { auth: false }),
   home: () => apiRequest("/home", { auth: false }),

@@ -99,6 +99,16 @@ export default function OrderDetail() {
 
   const openPdf = () => Linking.openURL(api.pdfUrl(order.id, order.token));
 
+  const resend = async () => {
+    try {
+      await api.resendOrder(id);
+      setNotifs(await api.orderNotifications(id, token));
+      toast("Avisos reenviados", "success");
+    } catch (e: any) {
+      toast(e.message || "Falha ao reenviar", "error");
+    }
+  };
+
   const dirty = JSON.stringify(items) !== JSON.stringify(order.items);
 
   return (
@@ -213,6 +223,9 @@ export default function OrderDetail() {
               </View>
             ))}
           </View>
+        )}
+        {!!user && (
+          <Button title="Reenviar aviso (WhatsApp/e-mail)" icon="paper-plane-outline" variant="secondary" onPress={resend} testID="resend-order-button" style={{ marginBottom: spacing.md }} />
         )}
         <Button title="Abrir PDF do pedido" icon="document-text-outline" variant="outline" onPress={openPdf} testID="open-pdf-button" />
       </ScrollView>

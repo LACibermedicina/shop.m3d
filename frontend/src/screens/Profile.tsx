@@ -4,7 +4,8 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/src/auth";
-import { Avatar, Button, useToast } from "@/src/ui";
+import { api } from "@/src/api";
+import { Avatar, Button, Field, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow } from "@/src/theme";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -14,12 +15,27 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export function ProfileScreen() {
-  const { user, logout, deleteAccount } = useAuth();
+  const { user, logout, deleteAccount, refresh } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [wa, setWa] = useState(user?.whatsapp || "");
+  const [savingWa, setSavingWa] = useState(false);
+
+  const saveWa = async () => {
+    setSavingWa(true);
+    try {
+      await api.setMyWhatsapp(wa.trim());
+      await refresh();
+      toast("WhatsApp salvo", "success");
+    } catch {
+      toast("Falha ao salvar", "error");
+    } finally {
+      setSavingWa(false);
+    }
+  };
 
   const doLogout = async () => {
     await logout();
@@ -62,6 +78,19 @@ export function ProfileScreen() {
           <Text style={styles.infoValue} numberOfLines={1}>
             {user?.user_id}
           </Text>
+        </View>
+
+        <View style={{ height: spacing.lg }} />
+        <View style={styles.waCard}>
+          <Field
+            testID="profile-whatsapp-input"
+            label="Meu WhatsApp (para confirmações)"
+            value={wa}
+            onChangeText={setWa}
+            placeholder="Ex: 5545999990000"
+            keyboardType="phone-pad"
+          />
+          <Button title="Salvar WhatsApp" onPress={saveWa} loading={savingWa} testID="save-whatsapp-button" variant="outline" />
         </View>
 
         <View style={{ height: spacing.xl }} />
@@ -136,6 +165,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   deleteText: { color: colors.error, fontSize: font.base, fontWeight: "600" },
+  waCard: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, ...shadow.card },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: spacing.xl },
   confirmCard: {
     width: "100%",
