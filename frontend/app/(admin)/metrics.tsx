@@ -10,7 +10,7 @@ import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
 const CARDS = [
   { key: "revenue", label: "Faturamento", icon: "cash-outline", color: colors.brandPrimary, isMoney: true },
   { key: "orders", label: "Pedidos", icon: "receipt-outline", color: colors.brandSecondary },
-  { key: "stores", label: "Barracas", icon: "business-outline", color: colors.success },
+  { key: "stores", label: "Lojas", icon: "business-outline", color: colors.success },
   { key: "products", label: "Produtos", icon: "pricetags-outline", color: colors.warning },
   { key: "customers", label: "Clientes", icon: "people-outline", color: colors.info },
 ];
@@ -19,6 +19,7 @@ export default function AdminMetrics() {
   const insets = useSafeAreaInsets();
   const [metrics, setMetrics] = useState<any>(null);
   const [notifs, setNotifs] = useState<any[]>([]);
+  const [waLog, setWaLog] = useState<any[]>([]);
   const [nStatus, setNStatus] = useState("");
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -34,6 +35,7 @@ export default function AdminMetrics() {
       const data = await api.metrics();
       setMetrics(data);
       await loadNotifs("");
+      try { setWaLog(await api.adminWaInbound()); } catch {}
       setState("done");
     } catch {
       setState("error");
@@ -109,6 +111,38 @@ export default function AdminMetrics() {
               </Text>
             </View>
           ))
+        )}
+
+        <View style={styles.notifHeader}>
+          <Text style={styles.notifTitle}>Comandos por WhatsApp</Text>
+          <Text style={styles.subtitle}>Cadastros e alterações recebidos no número root</Text>
+        </View>
+        {waLog.length === 0 ? (
+          <Text style={styles.notifEmpty}>Nenhum comando recebido ainda.</Text>
+        ) : (
+          waLog.slice(0, 60).map((w, i) => {
+            const map: any = {
+              criar: ["add-circle-outline", colors.success],
+              atualizar: ["create-outline", colors.info],
+              desativar: ["trash-outline", colors.error],
+              catalogo: ["document-text-outline", colors.brandSecondary],
+              ajuda: ["help-circle-outline", colors.warning],
+              desconhecido: ["ellipse-outline", colors.onSurfaceTertiary],
+            };
+            const [icon, color] = map[w.intent] || map.desconhecido;
+            return (
+              <View key={i} style={styles.notifCard} testID={`admin-wa-${i}`}>
+                <Ionicons name={icon} size={16} color={color} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.notifStore} numberOfLines={1}>
+                    {(w.store_name || "—")} • {w.from}
+                  </Text>
+                  <Text style={styles.notifTo} numberOfLines={1}>{w.result || w.text}</Text>
+                </View>
+                <Text style={[styles.notifStat, { color }]}>{w.intent}</Text>
+              </View>
+            );
+          })
         )}
       </ScrollView>
     </View>

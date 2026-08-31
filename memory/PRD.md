@@ -58,8 +58,21 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 - **Login em 2 modos**: Cliente vs Lojista/Administrador (segmentado); acesso definido pelo role.
 - **Notificações de pedido (modo teste)**: criar pedido e cada mudança de status notifica Lojista + Administrador (WhatsApp SIMULADO) e Cliente (WhatsApp se informado, senão e-mail real via Resend). Novos campos: store.admin_whatsapp, order.customer_whatsapp; ROOT_WHATSAPP=11920946954 fallback. Painel "Avisos enviados" no pedido; confirmação no app após a compra.
 
+### Iteração 7 (2026-08-31) — CRUD por WhatsApp (número root) via IA
+- **Webhook interpreta comandos**: `_process_inbound` agora identifica o remetente (lojista pelo whatsapp da loja) e usa IA (`interpret_command`, gemini-3-flash-preview) para classificar a intenção: **criar / atualizar / desativar / catálogo / ajuda / desconhecido**.
+  - criar: extrai nome/preço/descrição/categoria (texto ou imagem via `extract_product`) → insere produto (source=whatsapp) → responde confirmação.
+  - atualizar: acha produto por nome (match exato/substring) → aplica preço/nome/descrição/categoria → responde.
+  - desativar: soft-delete do produto → responde.
+  - catálogo: envia PDF (documento) via `GET /api/stores/{id}/catalog.pdf` + mensagem.
+  - ajuda/desconhecido: envia HELP_TEXT com exemplos de comandos.
+- **Respostas ao remetente**: helpers `wa_reply` (texto) e `wa_send_document` (PDF). Falham em silêncio se WA não configurado/token inválido (fluxo local continua funcionando).
+- **PDF de catálogo sob demanda**: `build_catalog_pdf(store, products)` + endpoint público `GET /api/stores/{id}/catalog.pdf`.
+- **Auditoria**: coleção `wa_inbound` registra remetente/loja/texto/intenção/resultado. Endpoint `GET /api/admin/wa-inbound`. Nova seção "Comandos por WhatsApp" na tela Admin → Métricas.
+- **Credenciais Meta**: preenchidas no backend/.env (WA_ACCESS_TOKEN/WA_PHONE_NUMBER_ID/META_APP_SECRET/WA_VERIFY_TOKEN/PUBLIC_BASE_URL). Token fornecido estava EXPIRADO e Phone Number ID incorreto (usuário enviou o telefone, não o ID). Webhook verify OK; envio real pendente de credenciais válidas (token de Usuário do Sistema + Phone Number ID correto do MESMO app do App Secret).
+- Testado via `tests/test_wa_crud.py` (assina HMAC e simula webhook): criar/atualizar/desativar/catálogo/ajuda + PDF gerando 200.
+
 ## Backlog
-- FASE GRANDE (próxima): CRUD por WhatsApp via número root (11920946954) — cadastrar/atualizar/desativar itens por mensagem, PDF de catálogo sob demanda, busca por similaridade (imagem/descrição), carrinho via WhatsApp, biblioteca de itens/carrinhos obsoletos p/ análise. Depende do WhatsApp Cloud API AO VIVO (webhook público) — ativar após deploy + credenciais Meta.
+- FASE GRANDE: CRUD por WhatsApp via número root — CONCLUÍDA no backend (ver Iteração 7). Falta apenas credenciais Meta válidas p/ envio/recebimento real.
 - P1: Ativar WhatsApp Cloud API (envios reais substituem o modo simulado automaticamente).
 - P2: Filtro de categoria também na home; ordenação por avaliação; validade/limite de uso nos cupons.
 - P2: Desabilitar dev-login em produção (EXPO_PUBLIC_ENABLE_DEV_LOGIN=false).

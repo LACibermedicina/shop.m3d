@@ -522,6 +522,53 @@ async def extract_product(message: str, image_path: str = ""):
             "category": str(data.get("category", "Outros")).strip() or "Outros"}
 
 
+async def interpret_command(message: str, has_image: bool = False):
+    """Classifica a intenção de uma mensagem de WhatsApp e extrai dados do produto."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    system = (
+        "Você interpreta mensagens de WhatsApp que lojistas e clientes enviam ao marketplace "
+        "'Lojas da Fronteira' (Tríplice Fronteira). Classifique a INTENÇÃO e extraia dados. "
+        "Responda SOMENTE com JSON válido no formato: "
+        '{"intent": "criar|atualizar|desativar|catalogo|ajuda|desconhecido", '
+        '"alvo": string, "name": string, "price": number, "description": string, "category": string}. '
+        "intent=criar: cadastrar/adicionar um novo produto. "
+        "intent=atualizar: mudar preço/nome/descrição de um item existente. "
+        "intent=desativar: remover/desativar/esgotou/tirar um item. "
+        "intent=catalogo: pediu o catálogo/lista/PDF dos produtos. "
+        "intent=ajuda: pediu ajuda/comandos/o que fazer. Caso contrário: desconhecido. "
+        "alvo = nome do produto citado para atualizar/desativar (vazio se criar). "
+        "name/price/description/category preenchidos quando intent=criar ou atualizar. "
+        "price em reais (número, sem R$; 0 se ausente). "
+        "category deve ser UMA de: Eletrônicos, Informática, Celulares, Perfumaria, Moda, "
+        "Calçados, Casa & Decoração, Brinquedos, Bebidas, Alimentos, Acessórios, Outros. "
+        "Nada além do JSON."
+    )
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"wa-cmd-{uuid.uuid4().hex[:8]}",
+                   system_message=system).with_model("gemini", "gemini-3-flash-preview")
+    hint = " (a mensagem veio acompanhada de uma imagem do produto)" if has_image else ""
+    try:
+        resp = await chat.send_message(UserMessage(text=f"Mensagem: {message or '(sem texto)'}{hint}"))
+    except Exception as e:
+        logger.error(f"WA interpret error: {e}")
+        return {"intent": "desconhecido"}
+    text = resp if isinstance(resp, str) else str(resp)
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return {"intent": "desconhecido"}
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return {"intent": "desconhecido"}
+    return {
+        "intent": str(data.get("intent", "desconhecido")).strip().lower(),
+        "alvo": str(data.get("alvo", "")).strip(),
+        "name": str(data.get("name", "")).strip(),
+        "price": float(data.get("price", 0) or 0),
+        "description": str(data.get("description", "")).strip(),
+        "category": str(data.get("category", "Outros")).strip() or "Outros",
+    }
+
+
 # ------------------------------------------------------------------ Orders
 def order_public(o):
     o.pop("_id", None)
@@ -697,6 +744,60 @@ def build_pdf(o):
     return buf.getvalue()
 
 
+@api.get("/stores/{store_id}/catalog.pdf")
+async def store_catalog_pdf(store_id: str):
+    store = await db.stores.find_one({"id": store_id, "deleted": {"$ne": True}}, {"_id": 0})
+    if not store:
+        raise HTTPException(status_code=404, detail="Loja não encontrada")
+    products = await db.products.find(
+        {"store_id": store_id, "deleted": {"$ne": True}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+    pdf = await run_in_threadpool(build_catalog_pdf, store, products)
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="catalogo-{store_id}.pdf"'})
+
+
+def build_catalog_pdf(store, products):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm,
+                            leftMargin=18 * mm, rightMargin=18 * mm)
+    styles = getSampleStyleSheet()
+    brand = colors.HexColor("#4A7C59")
+    title = ParagraphStyle("t", parent=styles["Title"], textColor=brand, fontSize=22)
+    h = ParagraphStyle("h", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#4A4C48"))
+    els = [Paragraph("Lojas da Fronteira", title),
+           Paragraph(f"<b>Catálogo:</b> {store['name']}", h),
+           Paragraph(f"<b>Itens ativos:</b> {len(products)}", h),
+           Spacer(1, 10 * mm)]
+    if not products:
+        els.append(Paragraph("Nenhum produto cadastrado ainda.", h))
+    else:
+        data = [["Produto", "Categoria", "Preço"]]
+        for p in products:
+            data.append([p.get("name", ""), p.get("category", "Outros"),
+                         f"R$ {float(p.get('price', 0) or 0):.2f}"])
+        table = Table(data, colWidths=[90 * mm, 45 * mm, 35 * mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), brand),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1C9BE")),
+            ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FDFBF7")]),
+            ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        els.append(table)
+    doc.build(els)
+    return buf.getvalue()
+
+
 # ------------------------------------------------------------------ Admin
 @api.get("/admin/metrics")
 async def admin_metrics(user=Depends(require_role("admin"))):
@@ -851,39 +952,179 @@ async def wa_webhook(request: Request):
     return {"ok": True}
 
 
+def _digits(s):
+    return (s or "").replace(" ", "").replace("+", "").replace("-", "")
+
+
+async def wa_reply(to: str, text: str):
+    if not (WA_CONFIGURED and to):
+        return
+    try:
+        await wa_send({"to": _digits(to), "type": "text", "text": {"body": text}})
+    except Exception as e:
+        logger.warning(f"WA reply failed: {e}")
+
+
+async def wa_send_document(to: str, link: str, filename: str, caption: str = ""):
+    if not (WA_CONFIGURED and to and link):
+        return
+    try:
+        await wa_send({"to": _digits(to), "type": "document",
+                       "document": {"link": link, "filename": filename, "caption": caption}})
+    except Exception as e:
+        logger.warning(f"WA document failed: {e}")
+
+
+def _match_number(candidate: str, sender: str) -> bool:
+    c = _digits(candidate)
+    return bool(c) and bool(sender) and (c.endswith(sender[-10:]) or sender.endswith(c[-10:]))
+
+
+async def _find_store_for_sender(sender: str):
+    stores = await db.stores.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(1000)
+    for s in stores:
+        if _match_number(s.get("whatsapp"), sender):
+            return s
+    return None
+
+
+async def _find_product_in_store(store_id: str, query: str):
+    if not query:
+        return None
+    prods = await db.products.find({"store_id": store_id, "deleted": {"$ne": True}}, {"_id": 0}).to_list(1000)
+    ql = query.strip().lower()
+    for p in prods:
+        if p.get("name", "").strip().lower() == ql:
+            return p
+    for p in prods:
+        nm = p.get("name", "").strip().lower()
+        if nm and (ql in nm or nm in ql):
+            return p
+    return None
+
+
+HELP_TEXT = (
+    "🛍️ *Lojas da Fronteira* — comandos por WhatsApp:\n\n"
+    "• *Cadastrar*: envie a descrição do produto (com foto, se quiser). "
+    "Ex: _Camiseta Polo azul, R$ 79,90_\n"
+    "• *Atualizar*: _atualizar Camiseta Polo para R$ 69,90_\n"
+    "• *Desativar*: _desativar Camiseta Polo_\n"
+    "• *Catálogo em PDF*: envie _catálogo_\n"
+    "• *Ajuda*: envie _ajuda_"
+)
+
+
+async def _record_inbound(sender, store, text, intent, result):
+    await db.wa_inbound.insert_one({
+        "id": new_id("wain"), "from": sender,
+        "store_id": (store or {}).get("id", ""), "store_name": (store or {}).get("name", ""),
+        "text": text, "intent": intent, "result": result, "created_at": now_iso(),
+    })
+
+
 async def _process_inbound(msg: dict):
     mid = msg.get("id")
     if not mid or await db.whatsapp_events.find_one({"message_id": mid}):
         return
-    await db.whatsapp_events.insert_one({"message_id": mid, "created_at": now_iso(), "from": msg.get("from")})
-    sender = (msg.get("from") or "").replace("+", "")
-    # match a store by whatsapp number (last 10-11 digits)
-    stores = await db.stores.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(1000)
-    store = None
-    for s in stores:
-        digits = (s.get("whatsapp") or "").replace(" ", "").replace("+", "")
-        if digits and (digits.endswith(sender[-10:]) or sender.endswith(digits[-10:])):
-            store = s
-            break
-    if not store:
-        logger.warning(f"WA inbound from unknown store number {sender}")
-        return
-    text = (msg.get("text") or {}).get("body", "")
+    sender = _digits(msg.get("from"))
+    await db.whatsapp_events.insert_one({"message_id": mid, "created_at": now_iso(), "from": sender})
+
+    text = (msg.get("text") or {}).get("body", "") or ""
     image_path = ""
     image = msg.get("image")
-    if image and image.get("id"):
+    has_image = bool(image and image.get("id"))
+    if has_image:
         try:
             image_path = await _download_wa_media(image["id"])
         except Exception as e:
             logger.warning(f"WA media download failed: {e}")
         text = text or image.get("caption", "")
-    parsed = await extract_product(text, image_path)
-    doc = {"id": new_id("prod"), "store_id": store["id"], "name": parsed["name"] or "Produto",
-           "description": parsed["description"], "price": parsed["price"], "image": image_path,
-           "category": parsed.get("category", "Outros"),
-           "deleted": False, "created_at": now_iso(), "source": "whatsapp"}
-    await db.products.insert_one(doc)
-    logger.info(f"WA product created for store {store['id']}: {doc['name']}")
+
+    store = await _find_store_for_sender(sender)
+    if not store:
+        await wa_reply(sender, "Olá! Este número atende lojistas cadastrados nas *Lojas da Fronteira*. "
+                               "Se você é lojista, peça ao administrador para vincular seu WhatsApp à sua loja.")
+        await _record_inbound(sender, None, text, "desconhecido", "remetente não é lojista")
+        return
+
+    cmd = await interpret_command(text, has_image)
+    intent = cmd.get("intent", "desconhecido")
+
+    if intent == "ajuda":
+        await wa_reply(sender, HELP_TEXT)
+        await _record_inbound(sender, store, text, "ajuda", "ajuda enviada")
+        return
+
+    if intent == "catalogo":
+        base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
+        if base:
+            link = f"{base}/api/stores/{store['id']}/catalog.pdf"
+            await wa_send_document(sender, link, f"catalogo-{store['name']}.pdf",
+                                   f"Catálogo de {store['name']}")
+            await wa_reply(sender, "📄 Aqui está o catálogo atualizado da sua loja.")
+        else:
+            await wa_reply(sender, "Não foi possível gerar o catálogo agora.")
+        await _record_inbound(sender, store, text, "catalogo", "catálogo enviado")
+        return
+
+    if intent in ("atualizar", "desativar"):
+        target = cmd.get("alvo") or cmd.get("name")
+        prod = await _find_product_in_store(store["id"], target)
+        if not prod:
+            await wa_reply(sender, f"Não encontrei o produto \"{target}\" na sua loja. "
+                                   "Envie *catálogo* para ver os itens cadastrados.")
+            await _record_inbound(sender, store, text, intent, f"produto não encontrado: {target}")
+            return
+        if intent == "desativar":
+            await db.products.update_one({"id": prod["id"]}, {"$set": {"deleted": True}})
+            await wa_reply(sender, f"✅ Produto *{prod['name']}* foi desativado do catálogo.")
+            await _record_inbound(sender, store, text, "desativar", f"desativado: {prod['name']}")
+            return
+        updates = {}
+        if cmd.get("price"):
+            updates["price"] = cmd["price"]
+        if cmd.get("name") and cmd["name"].strip().lower() != prod.get("name", "").strip().lower():
+            updates["name"] = cmd["name"]
+        if cmd.get("description"):
+            updates["description"] = cmd["description"]
+        if cmd.get("category") and cmd["category"] != "Outros":
+            updates["category"] = cmd["category"]
+        if not updates:
+            await wa_reply(sender, "Não entendi o que atualizar. Ex: _atualizar "
+                                   f"{prod['name']} para R$ 49,90_")
+            await _record_inbound(sender, store, text, "atualizar", "sem alterações claras")
+            return
+        await db.products.update_one({"id": prod["id"]}, {"$set": updates})
+        parts = []
+        if "price" in updates: parts.append(f"preço R$ {updates['price']:.2f}")
+        if "name" in updates: parts.append(f"nome '{updates['name']}'")
+        if "description" in updates: parts.append("descrição")
+        if "category" in updates: parts.append(f"categoria {updates['category']}")
+        await wa_reply(sender, f"✅ *{prod['name']}* atualizado: {', '.join(parts)}.")
+        await _record_inbound(sender, store, text, "atualizar", f"atualizado: {prod['name']}")
+        return
+
+    if intent == "criar" or has_image:
+        if has_image:
+            parsed = await extract_product(text, image_path)
+        elif cmd.get("name"):
+            parsed = cmd
+        else:
+            parsed = await extract_product(text, image_path)
+        name = parsed.get("name") or "Produto"
+        doc = {"id": new_id("prod"), "store_id": store["id"], "name": name,
+               "description": parsed.get("description", ""),
+               "price": float(parsed.get("price", 0) or 0), "image": image_path,
+               "category": parsed.get("category", "Outros"),
+               "deleted": False, "created_at": now_iso(), "source": "whatsapp"}
+        await db.products.insert_one(doc)
+        await wa_reply(sender, f"✅ Produto cadastrado: *{name}* — R$ {doc['price']:.2f} "
+                               f"({doc['category']}).\nEnvie *catálogo* para conferir.")
+        await _record_inbound(sender, store, text, "criar", f"criado: {name}")
+        return
+
+    await wa_reply(sender, "Não entendi 🤔\n\n" + HELP_TEXT)
+    await _record_inbound(sender, store, text, "desconhecido", "ajuda enviada")
 
 
 async def _download_wa_media(media_id: str) -> str:
@@ -1275,6 +1516,11 @@ async def admin_notifications(store_id: str = Query(""), status: str = Query("")
     for n in notifs:
         n["store_name"] = smap.get(n.get("store_id", ""), "—")
     return notifs
+
+
+@api.get("/admin/wa-inbound")
+async def admin_wa_inbound(user=Depends(require_role("admin"))):
+    return await db.wa_inbound.find({}, {"_id": 0}).sort("created_at", -1).to_list(300)
 
 
 @api.get("/")

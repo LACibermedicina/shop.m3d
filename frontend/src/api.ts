@@ -99,6 +99,7 @@ export const api = {
     apiRequest("/auth/whatsapp", { method: "PUT", body: { whatsapp } }),
   adminNotifications: (storeId = "", status = "") =>
     apiRequest(`/admin/notifications?store_id=${encodeURIComponent(storeId)}&status=${encodeURIComponent(status)}`),
+  adminWaInbound: () => apiRequest("/admin/wa-inbound"),
 
   stores: () => apiRequest("/stores", { auth: false }),
   home: () => apiRequest("/home", { auth: false }),
