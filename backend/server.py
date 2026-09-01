@@ -523,19 +523,25 @@ async def extract_product(message: str, image_path: str = ""):
 
 
 async def interpret_command(message: str, has_image: bool = False):
-    """Classifica a intenção de uma mensagem de WhatsApp e extrai dados do produto."""
+    """Classifica a intenção de uma mensagem de WhatsApp de LOJISTA e extrai dados."""
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     system = (
-        "Você interpreta mensagens de WhatsApp que lojistas e clientes enviam ao marketplace "
+        "Você interpreta mensagens de WhatsApp que LOJISTAS enviam ao marketplace "
         "'Lojas da Fronteira' (Tríplice Fronteira). Classifique a INTENÇÃO e extraia dados. "
         "Responda SOMENTE com JSON válido no formato: "
-        '{"intent": "criar|atualizar|desativar|catalogo|ajuda|desconhecido", '
-        '"alvo": string, "name": string, "price": number, "description": string, "category": string}. '
+        '{"intent": "criar|atualizar|desativar|catalogo|abrir_loja|fechar_loja|ver_pedidos|criar_cupom|ajuda|desconhecido", '
+        '"alvo": string, "name": string, "price": number, "description": string, "category": string, '
+        '"cupom_codigo": string, "cupom_valor": number, "cupom_tipo": "percent|fixed"}. '
         "intent=criar: cadastrar/adicionar um novo produto. "
         "intent=atualizar: mudar preço/nome/descrição de um item existente. "
         "intent=desativar: remover/desativar/esgotou/tirar um item. "
         "intent=catalogo: pediu o catálogo/lista/PDF dos produtos. "
-        "intent=ajuda: pediu ajuda/comandos/o que fazer. Caso contrário: desconhecido. "
+        "intent=abrir_loja: quer abrir a loja / ficar online / começar a vender. "
+        "intent=fechar_loja: quer fechar a loja / ficar offline / parar por hoje. "
+        "intent=ver_pedidos: quer ver os pedidos recebidos / vendas do dia. "
+        "intent=criar_cupom: quer criar um cupom de desconto (extraia cupom_codigo, cupom_valor e cupom_tipo; "
+        "percent se falar em % ou porcentagem, fixed se falar em R$/reais). "
+        "intent=ajuda: pediu ajuda/comandos. Caso contrário: desconhecido. "
         "alvo = nome do produto citado para atualizar/desativar (vazio se criar). "
         "name/price/description/category preenchidos quando intent=criar ou atualizar. "
         "price em reais (número, sem R$; 0 se ausente). "
@@ -566,6 +572,60 @@ async def interpret_command(message: str, has_image: bool = False):
         "price": float(data.get("price", 0) or 0),
         "description": str(data.get("description", "")).strip(),
         "category": str(data.get("category", "Outros")).strip() or "Outros",
+        "cupom_codigo": str(data.get("cupom_codigo", "")).strip(),
+        "cupom_valor": float(data.get("cupom_valor", 0) or 0),
+        "cupom_tipo": str(data.get("cupom_tipo", "percent")).strip().lower() or "percent",
+    }
+
+
+async def interpret_customer(message: str, has_image: bool = False):
+    """Classifica a intenção de uma mensagem de WhatsApp de CLIENTE (carrinho/busca)."""
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    system = (
+        "Você interpreta mensagens de WhatsApp que CLIENTES enviam ao marketplace "
+        "'Lojas da Fronteira'. O cliente busca produtos, monta um carrinho e finaliza um pedido. "
+        "Responda SOMENTE com JSON válido no formato: "
+        '{"intent": "buscar|adicionar|remover|ver_carrinho|finalizar|confirmar|cancelar|ajuda|desconhecido", '
+        '"query": string, "index": number, "qty": number, "sim": boolean}. '
+        "intent=buscar: descreve/procura um produto que deseja (query = descrição do produto). "
+        "intent=adicionar: quer adicionar um item da lista de resultados ao carrinho "
+        "(index = número do item citado, qty = quantidade, padrão 1). "
+        "intent=remover: quer remover um item do carrinho (index = número). "
+        "intent=ver_carrinho: quer ver o carrinho / o PDF do pedido. "
+        "intent=finalizar: quer fechar/finalizar o pedido. "
+        "intent=confirmar: está respondendo sim/não a uma confirmação (sim=true se confirmou, false se recusou). "
+        "intent=cancelar: quer cancelar/esvaziar o carrinho. "
+        "intent=ajuda: pediu ajuda. Caso contrário: desconhecido. "
+        "Se a mensagem for uma foto de produto sem texto claro, use intent=buscar. "
+        "Nada além do JSON."
+    )
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"wa-cli-{uuid.uuid4().hex[:8]}",
+                   system_message=system).with_model("gemini", "gemini-3-flash-preview")
+    hint = " (a mensagem veio com uma foto de um produto que o cliente procura)" if has_image else ""
+    try:
+        resp = await chat.send_message(UserMessage(text=f"Mensagem: {message or '(sem texto)'}{hint}"))
+    except Exception as e:
+        logger.error(f"WA customer interpret error: {e}")
+        return {"intent": "buscar" if has_image else "desconhecido", "query": message}
+    text = resp if isinstance(resp, str) else str(resp)
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return {"intent": "desconhecido"}
+    try:
+        data = json.loads(m.group(0))
+    except Exception:
+        return {"intent": "desconhecido"}
+    def _int(v):
+        try:
+            return int(float(v))
+        except Exception:
+            return 0
+    return {
+        "intent": str(data.get("intent", "desconhecido")).strip().lower(),
+        "query": str(data.get("query", "")).strip(),
+        "index": _int(data.get("index", 0)),
+        "qty": max(1, _int(data.get("qty", 1)) or 1),
+        "sim": bool(data.get("sim", False)),
     }
 
 
@@ -647,6 +707,8 @@ async def vendor_orders(user=Depends(require_role("lojista", "admin"))):
         if not user.get("store_id"):
             return []
         q["store_id"] = user["store_id"]
+        # pedidos criados via WhatsApp só aparecem após o cliente confirmar o envio
+        q["sent_to_vendor"] = {"$ne": False}
     orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     return orders
 
@@ -794,6 +856,122 @@ def build_catalog_pdf(store, products):
             ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ]))
         els.append(table)
+    doc.build(els)
+    return buf.getvalue()
+
+
+# ------------------------------------------------------------------ Busca global + Carrinho por WhatsApp
+def _norm(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s.lower()
+
+
+async def search_products_global(query: str, limit: int = 8):
+    """Busca produtos ativos em TODAS as lojas por similaridade simples de tokens."""
+    q = _norm(query)
+    tokens = [t for t in re.split(r"[^a-z0-9]+", q) if len(t) >= 3]
+    prods = await db.products.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    stores = await db.stores.find({"deleted": {"$ne": True}}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    smap = {s["id"]: s["name"] for s in stores}
+    scored = []
+    for p in prods:
+        name = _norm(p.get("name", ""))
+        desc = _norm(p.get("description", ""))
+        cat = _norm(p.get("category", ""))
+        score = 0
+        for t in tokens:
+            if t in name:
+                score += 3
+            if t in cat:
+                score += 2
+            if t in desc:
+                score += 1
+        if score > 0:
+            p = dict(p)
+            p["store_name"] = smap.get(p.get("store_id", ""), "—")
+            p["_score"] = score
+            scored.append(p)
+    scored.sort(key=lambda x: x["_score"], reverse=True)
+    return scored[:limit]
+
+
+async def _get_or_create_cart(sender: str):
+    cart = await db.wa_carts.find_one({"customer_phone": sender, "status": "building"}, {"_id": 0})
+    if cart:
+        return cart
+    user = await db.users.find_one({"whatsapp": {"$regex": f"{re.escape(sender[-10:])}$"}},
+                                   {"_id": 0, "user_id": 1, "name": 1})
+    cart = {
+        "id": new_id("wcart"), "token": uuid.uuid4().hex, "customer_phone": sender,
+        "customer_user_id": (user or {}).get("user_id", ""),
+        "customer_name": (user or {}).get("name", ""),
+        "items": [], "candidates": [], "status": "building", "pending_action": "",
+        "order_ids": [], "created_at": now_iso(),
+    }
+    await db.wa_carts.insert_one(cart)
+    cart.pop("_id", None)
+    return cart
+
+
+@api.get("/wa/cart/{cart_id}/pdf")
+async def wa_cart_pdf(cart_id: str, token: str = Query(...)):
+    cart = await db.wa_carts.find_one({"id": cart_id}, {"_id": 0})
+    if not cart or cart.get("token") != token:
+        raise HTTPException(status_code=404, detail="Carrinho não encontrado")
+    pdf = await run_in_threadpool(build_cart_pdf, cart)
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="pedido-{cart_id}.pdf"'})
+
+
+def build_cart_pdf(cart):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20 * mm, bottomMargin=20 * mm,
+                            leftMargin=18 * mm, rightMargin=18 * mm)
+    styles = getSampleStyleSheet()
+    brand = colors.HexColor("#4A7C59")
+    title = ParagraphStyle("t", parent=styles["Title"], textColor=brand, fontSize=22)
+    h = ParagraphStyle("h", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#4A4C48"))
+    sub = ParagraphStyle("s", parent=styles["Normal"], fontSize=13, textColor=brand, spaceBefore=8)
+    els = [Paragraph("Lojas da Fronteira", title),
+           Paragraph("<b>Pedido de compra (carrinho)</b>", h),
+           Paragraph(f"<b>Cliente:</b> {cart.get('customer_name') or cart.get('customer_phone','')}", h),
+           Spacer(1, 6 * mm)]
+    # agrupa por loja
+    groups = {}
+    for it in cart.get("items", []):
+        groups.setdefault((it.get("store_id"), it.get("store_name", "—")), []).append(it)
+    grand = 0.0
+    for (sid, sname), items in groups.items():
+        els.append(Paragraph(f"Loja: {sname}", sub))
+        data = [["Produto", "Qtd", "Preço", "Subtotal"]]
+        stotal = 0.0
+        for it in items:
+            line = it["price"] * it["qty"]
+            stotal += line
+            data.append([it["name"], str(it["qty"]), f"R$ {it['price']:.2f}", f"R$ {line:.2f}"])
+        data.append(["", "", "Subtotal", f"R$ {stotal:.2f}"])
+        grand += stotal
+        table = Table(data, colWidths=[80 * mm, 20 * mm, 35 * mm, 35 * mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), brand),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D1C9BE")),
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        els.append(table)
+    els.append(Spacer(1, 8 * mm))
+    els.append(Paragraph(f"<b>TOTAL GERAL: R$ {grand:.2f}</b>", sub))
     doc.build(els)
     return buf.getvalue()
 
@@ -1004,12 +1182,15 @@ async def _find_product_in_store(store_id: str, query: str):
 
 
 HELP_TEXT = (
-    "🛍️ *Lojas da Fronteira* — comandos por WhatsApp:\n\n"
+    "🛍️ *Lojas da Fronteira* — comandos do lojista:\n\n"
     "• *Cadastrar*: envie a descrição do produto (com foto, se quiser). "
     "Ex: _Camiseta Polo azul, R$ 79,90_\n"
     "• *Atualizar*: _atualizar Camiseta Polo para R$ 69,90_\n"
     "• *Desativar*: _desativar Camiseta Polo_\n"
     "• *Catálogo em PDF*: envie _catálogo_\n"
+    "• *Abrir/Fechar loja*: _abrir loja_ / _fechar loja_\n"
+    "• *Ver pedidos*: envie _pedidos_\n"
+    "• *Criar cupom*: _criar cupom PROMO10 10%_\n"
     "• *Ajuda*: envie _ajuda_"
 )
 
@@ -1041,18 +1222,66 @@ async def _process_inbound(msg: dict):
         text = text or image.get("caption", "")
 
     store = await _find_store_for_sender(sender)
-    if not store:
-        await wa_reply(sender, "Olá! Este número atende lojistas cadastrados nas *Lojas da Fronteira*. "
-                               "Se você é lojista, peça ao administrador para vincular seu WhatsApp à sua loja.")
-        await _record_inbound(sender, None, text, "desconhecido", "remetente não é lojista")
-        return
+    if store:
+        await _handle_vendor(store, sender, text, image_path, has_image)
+    elif ROOT_WHATSAPP and _match_number(ROOT_WHATSAPP, sender):
+        await wa_reply(sender, "👑 Número de administrador reconhecido. A gestão de lojas, "
+                               "usuários e métricas é feita pelo aplicativo Lojas da Fronteira.")
+        await _record_inbound(sender, None, text, "admin", "superadmin reconhecido")
+    else:
+        await _handle_customer(sender, text, image_path, has_image)
 
+
+async def _handle_vendor(store, sender, text, image_path, has_image):
     cmd = await interpret_command(text, has_image)
     intent = cmd.get("intent", "desconhecido")
 
     if intent == "ajuda":
         await wa_reply(sender, HELP_TEXT)
         await _record_inbound(sender, store, text, "ajuda", "ajuda enviada")
+        return
+
+    if intent == "abrir_loja":
+        await db.stores.update_one({"id": store["id"]}, {"$set": {"is_open": True, "last_seen": now_iso()}})
+        await wa_reply(sender, f"🟢 *{store['name']}* está ABERTA. Boas vendas!")
+        await _record_inbound(sender, store, text, "abrir_loja", "loja aberta")
+        return
+
+    if intent == "fechar_loja":
+        await db.stores.update_one({"id": store["id"]}, {"$set": {"is_open": False}})
+        await wa_reply(sender, f"⚪ *{store['name']}* está FECHADA.")
+        await _record_inbound(sender, store, text, "fechar_loja", "loja fechada")
+        return
+
+    if intent == "ver_pedidos":
+        orders = await db.orders.find({"store_id": store["id"], "deleted": {"$ne": True}},
+                                      {"_id": 0}).sort("created_at", -1).to_list(10)
+        if not orders:
+            await wa_reply(sender, "Você ainda não recebeu pedidos.")
+        else:
+            lines = [f"• {o['id'][-6:]} — {o.get('customer_name', 'cliente')} — "
+                     f"R$ {o['total']:.2f} ({o['status']})" for o in orders]
+            await wa_reply(sender, "🧾 *Últimos pedidos da sua loja:*\n" + "\n".join(lines))
+        await _record_inbound(sender, store, text, "ver_pedidos", f"{len(orders)} pedidos")
+        return
+
+    if intent == "criar_cupom":
+        code = (cmd.get("cupom_codigo") or "").strip().upper()
+        val = cmd.get("cupom_valor") or 0
+        ctype = "fixed" if cmd.get("cupom_tipo") == "fixed" else "percent"
+        if not code or val <= 0:
+            await wa_reply(sender, "Para criar um cupom informe o código e o valor. "
+                                   "Ex: _criar cupom PROMO10 10%_")
+            await _record_inbound(sender, store, text, "criar_cupom", "dados insuficientes")
+            return
+        await db.coupons.update_one(
+            {"store_id": store["id"], "code": code},
+            {"$set": {"id": new_id("cpn"), "store_id": store["id"], "code": code, "type": ctype,
+                      "value": val, "active": True, "deleted": False, "created_at": now_iso()}},
+            upsert=True)
+        desc = f"{val:.0f}%" if ctype == "percent" else f"R$ {val:.2f}"
+        await wa_reply(sender, f"🎟️ Cupom *{code}* criado ({desc} de desconto).")
+        await _record_inbound(sender, store, text, "criar_cupom", f"cupom {code}")
         return
 
     if intent == "catalogo":
@@ -1125,6 +1354,217 @@ async def _process_inbound(msg: dict):
 
     await wa_reply(sender, "Não entendi 🤔\n\n" + HELP_TEXT)
     await _record_inbound(sender, store, text, "desconhecido", "ajuda enviada")
+
+
+CUSTOMER_HELP = (
+    "🛒 *Lojas da Fronteira* — comprar pelo WhatsApp:\n\n"
+    "• *Procurar*: descreva o produto (ou envie uma foto). Ex: _tênis de corrida nº 42_\n"
+    "• *Adicionar*: _adicionar 2_ (item 2 da lista) — pode dizer a quantidade\n"
+    "• *Ver carrinho*: envie _carrinho_\n"
+    "• *Remover*: _remover 1_\n"
+    "• *Finalizar*: envie _finalizar_ e confirme com *SIM*\n"
+    "• *Ajuda*: envie _ajuda_"
+)
+
+
+def _cart_link(cart):
+    base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
+    return f"{base}/api/wa/cart/{cart['id']}/pdf?token={cart['token']}" if base else ""
+
+
+async def _reply_cart(sender, cart):
+    items = cart.get("items", [])
+    lines = [f"{i+1}. {it['qty']}x {it['name']} — {it['store_name']} — "
+             f"R$ {it['price'] * it['qty']:.2f}" for i, it in enumerate(items)]
+    total = sum(it["price"] * it["qty"] for it in items)
+    await wa_reply(sender, "🛒 *Seu carrinho:*\n" + "\n".join(lines) + f"\n\n*Total: R$ {total:.2f}*")
+    link = _cart_link(cart)
+    if link:
+        await wa_send_document(sender, link, f"carrinho-{cart['id']}.pdf", "Seu carrinho em PDF")
+
+
+async def _create_orders_from_cart(cart):
+    groups = {}
+    for it in cart.get("items", []):
+        groups.setdefault(it["store_id"], []).append(it)
+    order_ids = []
+    for sid, items in groups.items():
+        store = await db.stores.find_one({"id": sid}, {"_id": 0}) or {}
+        subtotal = round(sum(i["price"] * i["qty"] for i in items), 2)
+        doc = {"id": new_id("order"), "token": uuid.uuid4().hex, "store_id": sid,
+               "store_name": store.get("name", items[0].get("store_name", "")),
+               "store_whatsapp": store.get("whatsapp", ""),
+               "customer_user_id": cart.get("customer_user_id", ""),
+               "customer_name": cart.get("customer_name", "") or cart.get("customer_phone", ""),
+               "items": [{"product_id": i["product_id"], "name": i["name"],
+                          "price": i["price"], "qty": i["qty"]} for i in items],
+               "subtotal": subtotal, "discount": 0.0, "coupon_code": "", "total": subtotal,
+               "notes": "", "customer_whatsapp": cart.get("customer_phone", ""),
+               "status": "novo", "editable": True, "deleted": False, "created_at": now_iso(),
+               "source": "whatsapp", "general_order_id": cart["id"], "sent_to_vendor": False}
+        await db.orders.insert_one(doc)
+        order_ids.append(doc["id"])
+    await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"order_ids": order_ids}})
+    return order_ids
+
+
+async def _send_cart_orders(cart):
+    doc = await db.wa_carts.find_one({"id": cart["id"]}, {"_id": 0}) or {}
+    n = 0
+    for oid in doc.get("order_ids", []):
+        o = await db.orders.find_one({"id": oid, "deleted": {"$ne": True}}, {"_id": 0})
+        if not o:
+            continue
+        try:
+            await notify_order(o, "created")
+        except Exception as e:
+            logger.warning(f"cart notify failed: {e}")
+        await db.orders.update_one({"id": oid}, {"$set": {"sent_to_vendor": True}})
+        n += 1
+    return n
+
+
+async def _handle_customer(sender, text, image_path, has_image):
+    cart = await _get_or_create_cart(sender)
+    low = _norm(text)
+    affirm = low in {"sim", "s", "confirmar", "confirmo", "ok", "pode", "isso", "claro",
+                     "confirmado", "quero"} or low.startswith("sim")
+    negate = low in {"nao", "n", "cancelar", "cancela", "depois", "espera", "espere"} or low.startswith("nao")
+
+    pending = cart.get("pending_action", "")
+    if pending == "confirm_create":
+        if affirm:
+            await _create_orders_from_cart(cart)
+            await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"pending_action": "confirm_send"}})
+            link = _cart_link(cart)
+            if link:
+                await wa_send_document(sender, link, f"pedido-{cart['id']}.pdf", "Seu pedido")
+            await wa_reply(sender, "✅ Pedido criado! Confirma o *envio aos lojistas*? "
+                                   "Responda *SIM* para enviar.")
+            await _record_inbound(sender, None, text, "confirmar", "pedido criado")
+        elif negate:
+            await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"pending_action": ""}})
+            await wa_reply(sender, "Ok! Seu carrinho continua salvo. "
+                                   "Envie *finalizar* quando quiser fechar.")
+            await _record_inbound(sender, None, text, "confirmar", "criação recusada")
+        else:
+            await wa_reply(sender, "Responda *SIM* para criar o pedido ou *não* para continuar comprando.")
+        return
+
+    if pending == "confirm_send":
+        if affirm:
+            n = await _send_cart_orders(cart)
+            await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"status": "sent", "pending_action": ""}})
+            await wa_reply(sender, f"🚀 Enviado! {n} loja(s) receberam seus pedidos. "
+                                   "Cada lojista vê apenas os itens da própria loja. Obrigado pela compra!")
+            await _record_inbound(sender, None, text, "confirmar", f"enviado a {n} lojas")
+        elif negate:
+            await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"pending_action": ""}})
+            await wa_reply(sender, "Ok! Os pedidos foram criados mas *não* enviados aos lojistas. "
+                                   "Envie *finalizar* novamente para enviar depois.")
+            await _record_inbound(sender, None, text, "confirmar", "envio recusado")
+        else:
+            await wa_reply(sender, "Responda *SIM* para enviar aos lojistas ou *não* para enviar depois.")
+        return
+
+    cmd = await interpret_customer(text, has_image)
+    intent = cmd.get("intent", "desconhecido")
+
+    if intent == "ajuda":
+        await wa_reply(sender, CUSTOMER_HELP)
+        await _record_inbound(sender, None, text, "ajuda", "ajuda cliente")
+        return
+
+    if intent == "cancelar":
+        await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"items": [], "pending_action": ""}})
+        await wa_reply(sender, "🗑️ Carrinho esvaziado.")
+        await _record_inbound(sender, None, text, "cancelar", "carrinho limpo")
+        return
+
+    if intent == "buscar" or (has_image and intent in ("desconhecido", "buscar")):
+        query = cmd.get("query") or text
+        if has_image:
+            try:
+                desc = await extract_product(text or "", image_path)
+                query = " ".join([desc.get("name", ""), desc.get("category", ""),
+                                  desc.get("description", "")]).strip() or query
+            except Exception:
+                pass
+        results = await search_products_global(query, 8)
+        if not results:
+            await wa_reply(sender, f"Não encontrei produtos para \"{query}\". "
+                                   "Tente descrever de outro jeito 🙂")
+            await _record_inbound(sender, None, text, "buscar", f"0 resultados: {query}")
+            return
+        cand = [{"product_id": p["id"], "store_id": p["store_id"], "store_name": p["store_name"],
+                 "name": p["name"], "price": float(p.get("price", 0) or 0)} for p in results]
+        await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"candidates": cand}})
+        lines = [f"{i+1}. {c['name']} — {c['store_name']} — R$ {c['price']:.2f}"
+                 for i, c in enumerate(cand)]
+        await wa_reply(sender, "🔎 *Encontrei estas opções:*\n" + "\n".join(lines) +
+                       "\n\nEnvie *adicionar 2* para colocar o item 2 no carrinho "
+                       "(pode indicar a quantidade, ex: _adicionar 2 x3_).")
+        await _record_inbound(sender, None, text, "buscar", f"{len(cand)} resultados: {query}")
+        return
+
+    if intent == "adicionar":
+        cand = cart.get("candidates", [])
+        idx = cmd.get("index", 0)
+        if not cand:
+            await wa_reply(sender, "Primeiro descreva ou envie a foto do produto que procura 🙂")
+            return
+        if idx < 1 or idx > len(cand):
+            await wa_reply(sender, f"Escolha um número de 1 a {len(cand)}.")
+            return
+        c = cand[idx - 1]
+        qty = cmd.get("qty", 1)
+        items = cart.get("items", [])
+        for it in items:
+            if it["product_id"] == c["product_id"]:
+                it["qty"] += qty
+                break
+        else:
+            items.append({**c, "qty": qty})
+        await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"items": items}})
+        total = sum(i["price"] * i["qty"] for i in items)
+        await wa_reply(sender, f"🛒 Adicionado: {qty}x {c['name']}.\n"
+                               f"Carrinho: {len(items)} item(ns) — total R$ {total:.2f}.\n"
+                               "Envie *carrinho* para ver ou *finalizar* para fechar.")
+        await _record_inbound(sender, None, text, "adicionar", f"{qty}x {c['name']}")
+        return
+
+    if intent == "remover":
+        items = cart.get("items", [])
+        idx = cmd.get("index", 0)
+        if idx < 1 or idx > len(items):
+            await wa_reply(sender, "Envie *carrinho* para ver os números e depois *remover N*.")
+            return
+        removed = items.pop(idx - 1)
+        await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"items": items}})
+        await wa_reply(sender, f"Removido: {removed['name']}.")
+        await _record_inbound(sender, None, text, "remover", removed["name"])
+        return
+
+    if intent == "ver_carrinho":
+        if not cart.get("items"):
+            await wa_reply(sender, "Seu carrinho está vazio. Descreva um produto para começar 🙂")
+            return
+        await _reply_cart(sender, cart)
+        await _record_inbound(sender, None, text, "ver_carrinho", f"{len(cart['items'])} itens")
+        return
+
+    if intent == "finalizar":
+        if not cart.get("items"):
+            await wa_reply(sender, "Seu carrinho está vazio.")
+            return
+        await _reply_cart(sender, cart)
+        await db.wa_carts.update_one({"id": cart["id"]}, {"$set": {"pending_action": "confirm_create"}})
+        await wa_reply(sender, "Deseja *criar* este pedido? Responda *SIM* para confirmar.")
+        await _record_inbound(sender, None, text, "finalizar", "aguardando confirmação")
+        return
+
+    await wa_reply(sender, "Não entendi 🤔\n\n" + CUSTOMER_HELP)
+    await _record_inbound(sender, None, text, "desconhecido", "ajuda cliente")
 
 
 async def _download_wa_media(media_id: str) -> str:

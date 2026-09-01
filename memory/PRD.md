@@ -71,6 +71,18 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 - **Credenciais Meta**: preenchidas no backend/.env (WA_ACCESS_TOKEN/WA_PHONE_NUMBER_ID/META_APP_SECRET/WA_VERIFY_TOKEN/PUBLIC_BASE_URL). Token fornecido estava EXPIRADO e Phone Number ID incorreto (usuário enviou o telefone, não o ID). Webhook verify OK; envio real pendente de credenciais válidas (token de Usuário do Sistema + Phone Number ID correto do MESMO app do App Secret).
 - Testado via `tests/test_wa_crud.py` (assina HMAC e simula webhook): criar/atualizar/desativar/catálogo/ajuda + PDF gerando 200.
 
+### Iteração 8 (2026-08-31) — comandos naturais do lojista + carrinho de cliente por WhatsApp
+- **Roteamento por remetente** em `_process_inbound`: loja (por whatsapp) → `_handle_vendor`; número ROOT_WHATSAPP → superadmin (aviso); senão → `_handle_customer` (cliente).
+- **Lojista (linguagem natural, `interpret_command` expandido)**: além de criar/atualizar/desativar/catálogo, agora **abrir_loja**, **fechar_loja** (is_open), **ver_pedidos** (últimos 10 da loja), **criar_cupom** (extrai código/valor/tipo, upsert em coupons).
+- **Cliente (`interpret_customer` + coleção `wa_carts`)**:
+  - **buscar**: texto OU foto (foto → `extract_product` vira query) → `search_products_global` (tokens em nome/categoria/descrição, top 8) → lista numerada + guarda candidates.
+  - **adicionar N [qtd]** / **remover N** / **ver_carrinho** (PDF via `build_cart_pdf` agrupado por loja) / **cancelar**.
+  - **finalizar** → estado `confirm_create` → cliente responde SIM → cria **1 pedido por loja** (source=whatsapp, general_order_id=cart, sent_to_vendor=False) → estado `confirm_send` → SIM → `notify_order(created)` por pedido, sent_to_vendor=True.
+  - Cada lojista recebe/vê SÓ os itens da própria loja; `GET /vendor/orders` (lojista) esconde pedidos WhatsApp com sent_to_vendor=False. O PDF geral do cliente mostra tudo (multi-loja).
+- **Endpoints novos**: `GET /api/wa/cart/{id}/pdf?token=`, `GET /api/stores/{id}/catalog.pdf`, `GET /api/admin/wa-inbound`.
+- **Admin → Métricas**: seção "Comandos por WhatsApp" com ícones por tipo (inclui novos intents).
+- Testado via `tests/test_wa_full.py`: comandos de lojista + carrinho multi-loja (2 lojas) criando e enviando pedidos separados corretamente.
+
 ## Backlog
 - FASE GRANDE: CRUD por WhatsApp via número root — CONCLUÍDA no backend (ver Iteração 7). Falta apenas credenciais Meta válidas p/ envio/recebimento real.
 - P1: Ativar WhatsApp Cloud API (envios reais substituem o modo simulado automaticamente).
