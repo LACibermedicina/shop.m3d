@@ -84,3 +84,13 @@ android-sdk/
 .env.*
 **/.env
 **/.env.*
+
+.env
+.env.*
+**/.env
+**/.env.*
+
+.env
+.env.*
+**/.env
+**/.env.*
