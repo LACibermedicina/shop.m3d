@@ -22,7 +22,9 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.emergent.bazaarapp.dr94jy",
-      "permissions": ["READ_MEDIA_IMAGES"]
+      "permissions": [
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "bundler": "metro",

@@ -101,3 +101,23 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Bring the existing GitHub project (LACibermedicina/catalogo — "Lojas da Fronteira" marketplace
+  for the Triple Frontier / Foz do Iguaçu) into this environment, configure it, and make it
+  available for previews.
+
+setup_notes:
+  - The repo's .env files had been removed (commit "Remover arquivos sensíveis").
+  - Recreated /app/backend/.env and /app/frontend/.env configured for THIS container's preview
+    endpoint (31cf1b8e-eeac-4a99-a0bb-23469ea3f3ec.preview.emergentagent.com) with a fresh
+    EMERGENT_LLM_KEY. WhatsApp Cloud API tokens left empty (integration dormant until configured).
+  - Installed missing backend dependency reportlab==5.0.0.
+  - backend + expo services restarted and RUNNING. Web preview renders correctly.
+  - Backend API verified: /api/whatsapp/status, /api/stores, /api/home, /api/auth/dev-login all OK.
+  - Frontend verified via Playwright: login screen renders (hero + branding + role segments +
+    login buttons). App is functional; database currently empty (no seeded stores/products).
+
+agent_communication:
+    -agent: "main"
+    -message: "Project imported and configured for preview. Services running, preview live. No new features added per user request scope (configure + preview only)."

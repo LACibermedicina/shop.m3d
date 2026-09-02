@@ -1,6 +1,6 @@
 import hmac, hashlib, json, time, requests
 
-BASE = "https://bazaar-app-85.preview.emergentagent.com"
+BASE = "https://mobile-preview-871.preview.emergentagent.com"
 APP_SECRET = "33ad148123a77e050633a92d04c20a53"
 SENDER = "5511977778888"
 
