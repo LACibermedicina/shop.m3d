@@ -12,18 +12,24 @@ import {
   Switch,
 } from "react-native";
 import { Image } from "expo-image";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, fileUrl, uploadImage } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { pickImage, openAppSettings } from "@/src/imagePicker";
 import { Loading, EmptyState, ErrorState, Button, Field, Chip, useToast } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money, CATEGORIES } from "@/src/theme";
+import { colors, spacing, radius, font, shadow, money, gradients, CATEGORIES } from "@/src/theme";
 
 export default function AdminStores() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const router = useRouter();
+  const { user: me } = useAuth();
+  const isMaster = me?.role === "master";
   const [stores, setStores] = useState<any[]>([]);
+  const [admins, setAdmins] = useState<any[]>([]);
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
 
   // product/category manager
@@ -67,17 +73,25 @@ export default function AdminStores() {
   const [logoPath, setLogoPath] = useState("");
   const [logoUri, setLogoUri] = useState("");
   const [featured, setFeatured] = useState(false);
+  const [adminId, setAdminId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const data = await api.stores();
-      setStores(data);
+      const scoped = isMaster ? data : data.filter((s: any) => s.admin_id === me?.user_id);
+      setStores(scoped);
+      if (isMaster) {
+        try {
+          const us = await api.users();
+          setAdmins(us.filter((u: any) => u.role === "admin"));
+        } catch {}
+      }
       setState("done");
     } catch {
       setState("error");
     }
-  }, []);
+  }, [isMaster, me?.user_id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -94,6 +108,7 @@ export default function AdminStores() {
     setLogoPath("");
     setLogoUri("");
     setFeatured(false);
+    setAdminId(isMaster ? null : me?.user_id ?? null);
     setFormOpen(true);
   };
 
@@ -106,6 +121,7 @@ export default function AdminStores() {
     setLogoPath(s.logo || "");
     setLogoUri("");
     setFeatured(!!s.featured);
+    setAdminId(s.admin_id ?? null);
     setFormOpen(true);
   };
 
@@ -139,9 +155,15 @@ export default function AdminStores() {
     }
     setSaving(true);
     try {
-      const body = { name, description: desc, whatsapp: whats, admin_whatsapp: adminWhats, logo: logoPath, featured };
-      if (editing) await api.updateStore(editing.id, body);
-      else await api.createStore(body);
+      const body: any = { name, description: desc, whatsapp: whats, admin_whatsapp: adminWhats, logo: logoPath, featured };
+      if (isMaster) body.admin_id = adminId || undefined;
+      if (editing) {
+        await api.updateStore(editing.id, body);
+        // master pode (re)atribuir a loja a um admin mesmo em edição
+        if (isMaster) await api.masterAssignStore(editing.id, adminId);
+      } else {
+        await api.createStore(body);
+      }
       setFormOpen(false);
       toast("Loja salva", "success");
       await load();
@@ -164,9 +186,27 @@ export default function AdminStores() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>Lojas</Text>
-      </View>
+      <LinearGradient
+        colors={gradients.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.headerBar, { paddingTop: insets.top + spacing.md }]}
+      >
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>{isMaster ? "Todas as lojas" : "Minhas lojas"}</Text>
+            <Text style={styles.headerSub}>
+              {isMaster ? "Painel master · gestão completa" : "Lojas vinculadas a você"}
+            </Text>
+          </View>
+          <View style={styles.headerBadge}>
+            <Ionicons name={isMaster ? "shield-checkmark" : "business"} size={20} color="#fff" />
+          </View>
+          <Pressable testID="admin-invite-button" onPress={() => router.push("/invites")} style={styles.headerBadge}>
+            <Ionicons name="person-add" size={20} color="#fff" />
+          </Pressable>
+        </View>
+      </LinearGradient>
 
       {state === "loading" ? (
         <Loading />
@@ -307,6 +347,29 @@ export default function AdminStores() {
                   thumbColor="#fff"
                 />
               </View>
+              {isMaster && (
+                <View style={{ marginBottom: spacing.lg }}>
+                  <Text style={styles.switchLabel}>Administrador responsável</Text>
+                  <Text style={styles.switchHint}>Vincule esta loja a um admin (opcional)</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catScroll}>
+                    <Chip
+                      testID="assign-admin-none"
+                      label="Sem admin"
+                      active={!adminId}
+                      onPress={() => setAdminId(null)}
+                    />
+                    {admins.map((a) => (
+                      <Chip
+                        key={a.user_id}
+                        testID={`assign-admin-${a.user_id}`}
+                        label={a.name || a.email}
+                        active={adminId === a.user_id}
+                        onPress={() => setAdminId(a.user_id)}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
               <Button title="Salvar loja" onPress={save} loading={saving} testID="save-store-button" />
             </ScrollView>
           </View>
@@ -318,8 +381,24 @@ export default function AdminStores() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  headerBar: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
+  headerBar: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    ...shadow.card,
+  },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  headerSub: { fontSize: font.sm, color: "rgba(255,255,255,0.85)", marginTop: 2 },
+  headerBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
   card: {
     flexDirection: "row",
     alignItems: "center",

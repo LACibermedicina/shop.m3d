@@ -149,6 +149,41 @@ export const api = {
 
   metrics: () => apiRequest("/admin/metrics"),
   users: () => apiRequest("/admin/users"),
-  setUserRole: (id: string, role: string, storeId?: string | null) =>
-    apiRequest(`/admin/users/${id}/role`, { method: "PUT", body: { role, store_id: storeId } }),
+  setUserRole: (id: string, role: string, storeId?: string | null, adminId?: string | null) =>
+    apiRequest(`/admin/users/${id}/role`, { method: "PUT", body: { role, store_id: storeId, admin_id: adminId ?? null } }),
+  // Master (super-admin) endpoints
+  masterOverview: () => apiRequest("/master/overview"),
+  masterCreateUser: (email: string, role: string, name?: string) =>
+    apiRequest("/master/users", { method: "POST", body: { email, role, name } }),
+  masterDeleteUser: (id: string) => apiRequest(`/master/users/${id}`, { method: "DELETE" }),
+  masterAssignStore: (storeId: string, adminId: string | null) =>
+    apiRequest(`/master/stores/${storeId}/assign`, { method: "PUT", body: { admin_id: adminId } }),
+
+  // Invites
+  createInvite: (storeId: string, clientEmail?: string) =>
+    apiRequest("/invites", { method: "POST", body: { store_id: storeId, client_email: clientEmail || "" } }),
+  invites: () => apiRequest("/invites"),
+  revokeInvite: (id: string) => apiRequest(`/invites/${id}`, { method: "DELETE" }),
+  getInvite: (token: string) => apiRequest(`/invite/${token}`, { auth: false }),
+  acceptInvite: (token: string) => apiRequest(`/invite/${token}/accept`, { method: "POST" }),
+  catalogStores: () => apiRequest("/my/catalog-stores"),
+
+  // Personal shopping catalog
+  addCatalogItem: (storeId: string, productId: string, qty = 1, note = "") =>
+    apiRequest("/catalog", { method: "POST", body: { store_id: storeId, product_id: productId, qty, note } }),
+  catalog: (storeId = "", category = "", q = "") =>
+    apiRequest(`/catalog?store_id=${encodeURIComponent(storeId)}&category=${encodeURIComponent(category)}&q=${encodeURIComponent(q)}`),
+  updateCatalogItem: (id: string, qty?: number, note?: string) =>
+    apiRequest(`/catalog/${id}`, { method: "PUT", body: { qty, note } }),
+  removeCatalogItem: (id: string) => apiRequest(`/catalog/${id}`, { method: "DELETE" }),
+  sendCatalog: (itemIds: string[] | null, notes = "", customerName = "", customerWhatsapp = "") =>
+    apiRequest("/catalog/send", { method: "POST", body: { item_ids: itemIds, notes, customer_name: customerName, customer_whatsapp: customerWhatsapp } }),
+  catalogReportUrl: async (storeId = "", category = "") => {
+    const t = await loadToken();
+    return `${BASE}/api/catalog/report.pdf?store_id=${encodeURIComponent(storeId)}&category=${encodeURIComponent(category)}&token=${encodeURIComponent(t || "")}`;
+  },
+
+  // Translation
+  translate: (texts: string[], target: string) =>
+    apiRequest("/translate", { method: "POST", body: { texts, target }, auth: false }),
 };

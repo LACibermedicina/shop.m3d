@@ -115,6 +115,10 @@ export default function VendorOrders() {
           <Ionicons name="pricetag-outline" size={16} color={colors.brandPrimary} />
           <Text style={styles.couponBtnText}>Gerenciar cupons</Text>
         </Pressable>
+        <Pressable testID="vendor-invite-button" onPress={() => router.push("/invites")} style={styles.couponBtn}>
+          <Ionicons name="person-add-outline" size={16} color={colors.brandPrimary} />
+          <Text style={styles.couponBtnText}>Convidar clientes</Text>
+        </Pressable>
       </View>
       {newCount > 0 && (
         <View style={styles.alertBanner} testID="new-orders-banner">

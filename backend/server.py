@@ -33,6 +33,7 @@ EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 DEV_LOGIN_SECRET = os.environ.get("DEV_LOGIN_SECRET", "")
 ALLOW_DEV_LOGIN = os.environ.get("ALLOW_DEV_LOGIN", "").strip().lower() == "true"
 ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
+MASTER_EMAIL = os.environ.get("MASTER_EMAIL", "lucasmedicina86@gmail.com").strip().lower()
 
 # WhatsApp Cloud API (optional — dormant until configured)
 WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "").strip()
@@ -111,6 +112,7 @@ class StoreIn(BaseModel):
     whatsapp: str
     admin_whatsapp: Optional[str] = ""
     owner_user_id: Optional[str] = None
+    admin_id: Optional[str] = None
     featured: Optional[bool] = False
 
 
@@ -187,9 +189,47 @@ class StatusUpdate(BaseModel):
     status: str
 
 
+class InviteIn(BaseModel):
+    store_id: str
+    client_email: Optional[str] = ""
+
+
+class CatalogItemIn(BaseModel):
+    store_id: str
+    product_id: str
+    qty: int = 1
+    note: Optional[str] = ""
+
+
+class CatalogItemUpdate(BaseModel):
+    qty: Optional[int] = None
+    note: Optional[str] = None
+
+
+class CartSend(BaseModel):
+    item_ids: Optional[List[str]] = None  # None => all items in personal catalog
+    notes: Optional[str] = ""
+    customer_name: Optional[str] = ""
+    customer_whatsapp: Optional[str] = ""
+
+
+class TranslateReq(BaseModel):
+    texts: List[str]
+    target: str = "pt"
+    source: Optional[str] = "pt"
+
+
 class RoleUpdate(BaseModel):
     role: str
     store_id: Optional[str] = None
+    admin_id: Optional[str] = None
+
+
+class MasterUserIn(BaseModel):
+    email: str
+    name: Optional[str] = ""
+    role: str = "cliente"
+    admin_id: Optional[str] = None
 
 
 # ------------------------------------------------------------------ Auth helpers
@@ -215,18 +255,79 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 
 def require_role(*roles):
     async def checker(user=Depends(get_current_user)):
+        if user["role"] == "master":
+            return user
         if user["role"] not in roles:
             raise HTTPException(status_code=403, detail="Acesso negado")
         return user
     return checker
 
 
+def is_master(user) -> bool:
+    return user.get("role") == "master"
+
+
+async def admin_store_ids(user) -> List[str]:
+    """Store ids an admin manages (stores whose admin_id == admin's user_id)."""
+    ids = await db.stores.distinct("id", {"admin_id": user["user_id"], "deleted": {"$ne": True}})
+    return list(ids)
+
+
+async def optional_user(authorization: Optional[str] = Header(None)):
+    """Returns the user dict if a valid Bearer token is present, else None (no error)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not sess:
+        return None
+    exp = sess.get("expires_at")
+    if exp:
+        if isinstance(exp, str):
+            exp = datetime.fromisoformat(exp)
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            return None
+    return await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+
+
+async def client_store_ids(user) -> List[str]:
+    """Stores a client can access = stores that invited them (by user id or e-mail), not revoked."""
+    if not user:
+        return []
+    email_l = (user.get("email") or "").lower()
+    q = {"status": {"$ne": "revoked"},
+         "$or": [{"client_user_id": user["user_id"]}, {"client_email": email_l}]}
+    ids = await db.invites.distinct("store_id", q)
+    return list(ids)
+
+
+async def scoped_store_ids_for_viewer(user) -> Optional[List[str]]:
+    """None means 'no restriction' (public/admin/vendor/master). List means restrict to these ids."""
+    if not user or user.get("role") in ("admin", "master"):
+        return None
+    if user.get("role") == "lojista":
+        return [user["store_id"]] if user.get("store_id") else []
+    # cliente => invite-only
+    return await client_store_ids(user)
+
+
 async def upsert_user(email, name, picture):
     email_l = email.lower()
     existing = await db.users.find_one({"email": email_l})
     if existing:
+        # keep master role in sync even for pre-existing accounts
+        if email_l == MASTER_EMAIL and existing.get("role") != "master":
+            await db.users.update_one({"user_id": existing["user_id"]}, {"$set": {"role": "master"}})
+            existing["role"] = "master"
         return existing["user_id"], existing["role"], existing.get("store_id")
-    role = "admin" if email_l in ADMIN_EMAILS else "cliente"
+    if email_l == MASTER_EMAIL:
+        role = "master"
+    elif email_l in ADMIN_EMAILS:
+        role = "admin"
+    else:
+        role = "cliente"
     uid = f"user_{uuid.uuid4().hex[:12]}"
     doc = {"user_id": uid, "email": email_l, "name": name or email_l.split("@")[0],
            "picture": picture or "", "role": role, "store_id": None, "created_at": now_iso()}
@@ -264,17 +365,19 @@ async def dev_login(body: DevLogin):
     # Server-only gate. Disabled in production unless ALLOW_DEV_LOGIN=true.
     if not ALLOW_DEV_LOGIN:
         raise HTTPException(status_code=403, detail="Dev login desabilitado")
-    if body.role not in ("admin", "lojista", "cliente"):
+    if body.role not in ("admin", "lojista", "cliente", "master"):
         raise HTTPException(status_code=400, detail="Role inválida")
     email_l = body.email.lower()
+    # o e-mail master sempre entra como master, independentemente do que for pedido
+    role = "master" if email_l == MASTER_EMAIL else body.role
     existing = await db.users.find_one({"email": email_l})
     if existing:
         uid = existing["user_id"]
-        await db.users.update_one({"user_id": uid}, {"$set": {"role": body.role}})
+        await db.users.update_one({"user_id": uid}, {"$set": {"role": role}})
     else:
         uid = f"user_{uuid.uuid4().hex[:12]}"
         await db.users.insert_one({"user_id": uid, "email": email_l, "name": body.name or email_l.split("@")[0],
-                                   "picture": "", "role": body.role, "store_id": None, "created_at": now_iso()})
+                                   "picture": "", "role": role, "store_id": None, "created_at": now_iso()})
     token = await create_session(uid)
     user = await db.users.find_one({"user_id": uid}, {"_id": 0})
     return {"session_token": token, "user": user}
@@ -350,8 +453,12 @@ async def rating_summary(store_id: str):
 
 
 @api.get("/stores")
-async def list_stores():
-    stores = await db.stores.find({"deleted": {"$ne": True}, "active": {"$ne": False}}, {"_id": 0}).to_list(500)
+async def list_stores(viewer=Depends(optional_user)):
+    q = {"deleted": {"$ne": True}, "active": {"$ne": False}}
+    restrict = await scoped_store_ids_for_viewer(viewer)
+    if restrict is not None:
+        q["id"] = {"$in": restrict}
+    stores = await db.stores.find(q, {"_id": 0}).to_list(500)
     for s in stores:
         s["product_count"] = await db.products.count_documents({"store_id": s["id"], "deleted": {"$ne": True}})
         s["online"] = store_online(s)
@@ -360,10 +467,13 @@ async def list_stores():
 
 
 @api.get("/stores/{store_id}")
-async def get_store(store_id: str):
+async def get_store(store_id: str, viewer=Depends(optional_user)):
     s = await db.stores.find_one({"id": store_id, "deleted": {"$ne": True}}, {"_id": 0})
     if not s:
         raise HTTPException(status_code=404, detail="Loja não encontrada")
+    restrict = await scoped_store_ids_for_viewer(viewer)
+    if restrict is not None and store_id not in restrict:
+        raise HTTPException(status_code=403, detail="Você precisa de um convite para acessar esta loja")
     s["online"] = store_online(s)
     s.update(await rating_summary(store_id))
     return s
@@ -372,6 +482,11 @@ async def get_store(store_id: str):
 @api.post("/stores")
 async def create_store(body: StoreIn, user=Depends(require_role("admin"))):
     doc = body.dict()
+    # admin comum: a loja pertence a ele; master pode atribuir a qualquer admin
+    if is_master(user):
+        doc["admin_id"] = body.admin_id or None
+    else:
+        doc["admin_id"] = user["user_id"]
     doc.update({"id": new_id("store"), "active": True, "deleted": False,
                 "is_open": False, "last_seen": None, "created_at": now_iso()})
     await db.stores.insert_one(doc)
@@ -388,9 +503,15 @@ async def update_store(store_id: str, body: StoreIn, user=Depends(require_role("
         raise HTTPException(status_code=404, detail="Loja não encontrada")
     if user["role"] == "lojista" and user.get("store_id") != store_id:
         raise HTTPException(status_code=403, detail="Acesso negado")
+    if user["role"] == "admin" and s.get("admin_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Esta loja não está vinculada a você")
     updates = {k: v for k, v in body.dict().items() if v is not None}
     if user["role"] == "lojista":
         updates.pop("owner_user_id", None)
+        updates.pop("admin_id", None)
+    if user["role"] == "admin":
+        # admin comum não pode transferir a loja para outro admin
+        updates.pop("admin_id", None)
     await db.stores.update_one({"id": store_id}, {"$set": updates})
     if updates.get("owner_user_id"):
         await db.users.update_one({"user_id": updates["owner_user_id"]},
@@ -400,6 +521,11 @@ async def update_store(store_id: str, body: StoreIn, user=Depends(require_role("
 
 @api.delete("/stores/{store_id}")
 async def delete_store(store_id: str, user=Depends(require_role("admin"))):
+    s = await db.stores.find_one({"id": store_id, "deleted": {"$ne": True}})
+    if not s:
+        raise HTTPException(status_code=404, detail="Loja não encontrada")
+    if user["role"] == "admin" and s.get("admin_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Esta loja não está vinculada a você")
     await db.stores.update_one({"id": store_id}, {"$set": {"deleted": True}})
     return {"ok": True}
 
@@ -410,7 +536,11 @@ SORT_MAP = {"recent": ("created_at", -1), "name": ("name", 1),
 
 
 @api.get("/stores/{store_id}/products")
-async def store_products(store_id: str, sort: str = Query("recent"), category: str = Query("")):
+async def store_products(store_id: str, sort: str = Query("recent"), category: str = Query(""),
+                         viewer=Depends(optional_user)):
+    restrict = await scoped_store_ids_for_viewer(viewer)
+    if restrict is not None and store_id not in restrict:
+        raise HTTPException(status_code=403, detail="Você precisa de um convite para acessar esta loja")
     field, direction = SORT_MAP.get(sort, ("created_at", -1))
     q = {"store_id": store_id, "deleted": {"$ne": True}}
     if category and category != "Todos":
@@ -442,6 +572,8 @@ async def add_review(store_id: str, body: ReviewIn, user=Depends(get_current_use
 async def create_product(body: ProductIn, user=Depends(require_role("admin", "lojista"))):
     if user["role"] == "lojista" and user.get("store_id") != body.store_id:
         raise HTTPException(status_code=403, detail="Acesso negado")
+    if user["role"] == "admin" and body.store_id not in await admin_store_ids(user):
+        raise HTTPException(status_code=403, detail="Loja não vinculada a você")
     doc = body.dict()
     doc.update({"id": new_id("prod"), "deleted": False, "created_at": now_iso()})
     await db.products.insert_one(doc)
@@ -455,6 +587,8 @@ async def update_product(product_id: str, body: ProductUpdate, user=Depends(requ
         raise HTTPException(status_code=404, detail="Produto não encontrado")
     if user["role"] == "lojista" and user.get("store_id") != p["store_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
+    if user["role"] == "admin" and p["store_id"] not in await admin_store_ids(user):
+        raise HTTPException(status_code=403, detail="Loja não vinculada a você")
     updates = {k: v for k, v in body.dict().items() if v is not None}
     await db.products.update_one({"id": product_id}, {"$set": updates})
     return await db.products.find_one({"id": product_id}, {"_id": 0})
@@ -467,6 +601,8 @@ async def delete_product(product_id: str, user=Depends(require_role("admin", "lo
         raise HTTPException(status_code=404, detail="Produto não encontrado")
     if user["role"] == "lojista" and user.get("store_id") != p["store_id"]:
         raise HTTPException(status_code=403, detail="Acesso negado")
+    if user["role"] == "admin" and p["store_id"] not in await admin_store_ids(user):
+        raise HTTPException(status_code=403, detail="Loja não vinculada a você")
     await db.products.update_one({"id": product_id}, {"$set": {"deleted": True}})
     return {"ok": True}
 
@@ -709,6 +845,9 @@ async def vendor_orders(user=Depends(require_role("lojista", "admin"))):
         q["store_id"] = user["store_id"]
         # pedidos criados via WhatsApp só aparecem após o cliente confirmar o envio
         q["sent_to_vendor"] = {"$ne": False}
+    elif user["role"] == "admin":
+        ids = await admin_store_ids(user)
+        q["store_id"] = {"$in": ids}
     orders = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     return orders
 
@@ -979,11 +1118,24 @@ def build_cart_pdf(cart):
 # ------------------------------------------------------------------ Admin
 @api.get("/admin/metrics")
 async def admin_metrics(user=Depends(require_role("admin"))):
-    stores = await db.stores.count_documents({"deleted": {"$ne": True}})
-    products = await db.products.count_documents({"deleted": {"$ne": True}})
-    orders = await db.orders.count_documents({"deleted": {"$ne": True}})
-    customers = await db.users.count_documents({"role": "cliente"})
-    order_docs = await db.orders.find({"deleted": {"$ne": True}}, {"_id": 0, "total": 1}).to_list(5000)
+    store_q = {"deleted": {"$ne": True}}
+    if not is_master(user):
+        ids = await admin_store_ids(user)
+        store_q["id"] = {"$in": ids}
+        prod_store_filter = {"$in": ids}
+    else:
+        prod_store_filter = None
+    stores = await db.stores.count_documents(store_q)
+    if prod_store_filter is None:
+        products = await db.products.count_documents({"deleted": {"$ne": True}})
+        order_docs = await db.orders.find({"deleted": {"$ne": True}}, {"_id": 0, "total": 1, "customer_user_id": 1}).to_list(5000)
+        customers = await db.users.count_documents({"role": "cliente"})
+    else:
+        products = await db.products.count_documents({"deleted": {"$ne": True}, "store_id": prod_store_filter})
+        order_docs = await db.orders.find({"deleted": {"$ne": True}, "store_id": prod_store_filter},
+                                          {"_id": 0, "total": 1, "customer_user_id": 1}).to_list(5000)
+        customers = len({o.get("customer_user_id") for o in order_docs if o.get("customer_user_id")})
+    orders = len(order_docs)
     revenue = round(sum(o.get("total", 0) for o in order_docs), 2)
     return {"stores": stores, "products": products, "orders": orders,
             "customers": customers, "revenue": revenue}
@@ -991,24 +1143,91 @@ async def admin_metrics(user=Depends(require_role("admin"))):
 
 @api.get("/admin/users")
 async def admin_users(user=Depends(require_role("admin"))):
-    users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    if is_master(user):
+        users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    else:
+        # admin comum vê apenas os lojistas das lojas vinculadas a ele
+        ids = await admin_store_ids(user)
+        users = await db.users.find({"store_id": {"$in": ids}, "role": "lojista"}, {"_id": 0}
+                                    ).sort("created_at", -1).to_list(1000)
     return users
 
 
 @api.put("/admin/users/{user_id}/role")
-async def set_role(user_id: str, body: RoleUpdate, user=Depends(require_role("admin"))):
-    if body.role not in ("admin", "lojista", "cliente"):
+async def set_role(user_id: str, body: RoleUpdate, user=Depends(require_role("master"))):
+    # Somente o master altera papéis de clientes, lojistas e administradores.
+    if body.role not in ("admin", "lojista", "cliente", "master"):
         raise HTTPException(status_code=400, detail="Role inválida")
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
     updates = {"role": body.role, "store_id": body.store_id if body.role == "lojista" else None}
     await db.users.update_one({"user_id": user_id}, {"$set": updates})
+    # opcional: vincular a loja do lojista a um admin
+    if body.role == "lojista" and body.store_id and body.admin_id:
+        await db.stores.update_one({"id": body.store_id}, {"$set": {"admin_id": body.admin_id}})
     return await db.users.find_one({"user_id": user_id}, {"_id": 0})
 
 
+# ------------------------------------------------------------------ Master (super-admin)
+@api.get("/master/overview")
+async def master_overview(user=Depends(require_role("master"))):
+    users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    stores = await db.stores.find({"deleted": {"$ne": True}}, {"_id": 0}).to_list(1000)
+    counts = {"master": 0, "admin": 0, "lojista": 0, "cliente": 0}
+    for u in users:
+        counts[u.get("role", "cliente")] = counts.get(u.get("role", "cliente"), 0) + 1
+    return {"users": users, "stores": stores, "counts": counts}
+
+
+@api.post("/master/users")
+async def master_create_user(body: MasterUserIn, user=Depends(require_role("master"))):
+    if body.role not in ("admin", "lojista", "cliente", "master"):
+        raise HTTPException(status_code=400, detail="Role inválida")
+    email_l = body.email.strip().lower()
+    if not email_l:
+        raise HTTPException(status_code=400, detail="E-mail obrigatório")
+    existing = await db.users.find_one({"email": email_l})
+    role = "master" if email_l == MASTER_EMAIL else body.role
+    if existing:
+        await db.users.update_one({"user_id": existing["user_id"]}, {"$set": {"role": role}})
+        uid = existing["user_id"]
+    else:
+        uid = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({"user_id": uid, "email": email_l,
+                                   "name": body.name or email_l.split("@")[0], "picture": "",
+                                   "role": role, "store_id": None, "created_at": now_iso()})
+    return await db.users.find_one({"user_id": uid}, {"_id": 0})
+
+
+@api.delete("/master/users/{user_id}")
+async def master_delete_user(user_id: str, user=Depends(require_role("master"))):
+    if user_id == user["user_id"]:
+        raise HTTPException(status_code=400, detail="Você não pode excluir a si mesmo")
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if target and target.get("email") == MASTER_EMAIL:
+        raise HTTPException(status_code=400, detail="A conta master não pode ser excluída")
+    await db.user_sessions.delete_many({"user_id": user_id})
+    await db.users.delete_one({"user_id": user_id})
+    return {"ok": True}
+
+
+@api.put("/master/stores/{store_id}/assign")
+async def master_assign_store(store_id: str, body: dict, user=Depends(require_role("master"))):
+    s = await db.stores.find_one({"id": store_id, "deleted": {"$ne": True}})
+    if not s:
+        raise HTTPException(status_code=404, detail="Loja não encontrada")
+    await db.stores.update_one({"id": store_id}, {"$set": {"admin_id": body.get("admin_id") or None}})
+    return await db.stores.find_one({"id": store_id}, {"_id": 0})
+
+
 @api.get("/home")
-async def home():
-    stores = await db.stores.find(
-        {"deleted": {"$ne": True}, "active": {"$ne": False}}, {"_id": 0}
-    ).sort("created_at", -1).to_list(500)
+async def home(viewer=Depends(optional_user)):
+    q = {"deleted": {"$ne": True}, "active": {"$ne": False}}
+    restrict = await scoped_store_ids_for_viewer(viewer)
+    if restrict is not None:
+        q["id"] = {"$in": restrict}
+    stores = await db.stores.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     for s in stores:
         s["product_count"] = await db.products.count_documents(
             {"store_id": s["id"], "deleted": {"$ne": True}}
@@ -1029,21 +1248,26 @@ async def home():
 
 
 @api.get("/search")
-async def search(q: str = Query("")):
+async def search(q: str = Query(""), viewer=Depends(optional_user)):
     q = q.strip()
     if not q:
         return {"stores": [], "products": []}
+    restrict = await scoped_store_ids_for_viewer(viewer)
     rx = {"$regex": re.escape(q), "$options": "i"}
-    stores = await db.stores.find(
-        {"deleted": {"$ne": True}, "active": {"$ne": False}, "name": rx}, {"_id": 0}
-    ).to_list(50)
+    sq = {"deleted": {"$ne": True}, "active": {"$ne": False}, "name": rx}
+    if restrict is not None:
+        sq["id"] = {"$in": restrict}
+    stores = await db.stores.find(sq, {"_id": 0}).to_list(50)
     for s in stores:
         s["product_count"] = await db.products.count_documents(
             {"store_id": s["id"], "deleted": {"$ne": True}}
         )
         s["online"] = store_online(s)
         s.update(await rating_summary(s["id"]))
-    active_ids = await db.stores.distinct("id", {"deleted": {"$ne": True}, "active": {"$ne": False}})
+    active_q = {"deleted": {"$ne": True}, "active": {"$ne": False}}
+    if restrict is not None:
+        active_q["id"] = {"$in": restrict}
+    active_ids = await db.stores.distinct("id", active_q)
     all_stores = await db.stores.find({"id": {"$in": active_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
     smap = {s["id"]: s["name"] for s in all_stores}
     products = await db.products.find(
@@ -1053,6 +1277,367 @@ async def search(q: str = Query("")):
     for p in products:
         p["store_name"] = smap.get(p["store_id"], "")
     return {"stores": stores, "products": products}
+
+
+# ------------------------------------------------------------------ Invites (convite-only access)
+async def _can_manage_store(user, store):
+    if is_master(user):
+        return True
+    if user["role"] == "lojista" and user.get("store_id") == store["id"]:
+        return True
+    if user["role"] == "admin" and store.get("admin_id") == user["user_id"]:
+        return True
+    return False
+
+
+@api.post("/invites")
+async def create_invite(body: InviteIn, user=Depends(require_role("lojista", "admin"))):
+    store = await db.stores.find_one({"id": body.store_id, "deleted": {"$ne": True}}, {"_id": 0})
+    if not store:
+        raise HTTPException(status_code=404, detail="Loja não encontrada")
+    if not await _can_manage_store(user, store):
+        raise HTTPException(status_code=403, detail="Loja não vinculada a você")
+    email_l = (body.client_email or "").strip().lower()
+    doc = {"id": new_id("inv"), "token": uuid.uuid4().hex, "store_id": store["id"],
+           "store_name": store["name"], "store_logo": store.get("logo", ""),
+           "vendor_user_id": user["user_id"], "client_email": email_l,
+           "client_user_id": None, "status": "pending", "created_at": now_iso(),
+           "accepted_at": None}
+    await db.invites.insert_one(doc)
+    doc.pop("_id", None)
+    base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
+    doc["link"] = f"{base}/invite/{doc['token']}" if base else f"/invite/{doc['token']}"
+    # se houver e-mail, envia convite
+    if email_l:
+        try:
+            html = (f'<table role="presentation" width="100%"><tr><td style="padding:24px;'
+                    f'font-family:Arial,sans-serif;color:#1A1C19">'
+                    f'<h2 style="color:#4A7C59">Convite — {escape(store["name"])}</h2>'
+                    f'<p>Você foi convidado(a) a acessar o catálogo da loja <b>{escape(store["name"])}</b> '
+                    f'no app Lojas da Fronteira.</p>'
+                    f'<p><a href="{escape(doc["link"])}" style="background:#4A7C59;color:#fff;'
+                    f'padding:10px 18px;border-radius:8px;text-decoration:none">Acessar catálogo</a></p>'
+                    f'</td></tr></table>')
+            await send_email(to=email_l, subject=f"Convite para {store['name']} — Lojas da Fronteira", html=html)
+        except Exception as e:
+            logger.warning(f"invite email failed: {e}")
+    return doc
+
+
+@api.get("/invites")
+async def list_invites(user=Depends(require_role("lojista", "admin"))):
+    if is_master(user):
+        q = {}
+    elif user["role"] == "lojista":
+        q = {"store_id": user.get("store_id")}
+    else:
+        q = {"store_id": {"$in": await admin_store_ids(user)}}
+    invites = await db.invites.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return invites
+
+
+@api.delete("/invites/{invite_id}")
+async def revoke_invite(invite_id: str, user=Depends(require_role("lojista", "admin"))):
+    inv = await db.invites.find_one({"id": invite_id})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Convite não encontrado")
+    store = await db.stores.find_one({"id": inv["store_id"]}, {"_id": 0}) or {"id": inv["store_id"]}
+    if not await _can_manage_store(user, store):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    await db.invites.update_one({"id": invite_id}, {"$set": {"status": "revoked"}})
+    return {"ok": True}
+
+
+@api.get("/invite/{token}")
+async def get_invite(token: str):
+    inv = await db.invites.find_one({"token": token}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Convite inválido")
+    return {"store_id": inv["store_id"], "store_name": inv["store_name"],
+            "store_logo": inv.get("store_logo", ""), "status": inv["status"]}
+
+
+@api.post("/invite/{token}/accept")
+async def accept_invite(token: str, user=Depends(get_current_user)):
+    inv = await db.invites.find_one({"token": token})
+    if not inv or inv["status"] == "revoked":
+        raise HTTPException(status_code=404, detail="Convite inválido ou revogado")
+    await db.invites.update_one({"token": token}, {"$set": {
+        "client_user_id": user["user_id"], "status": "accepted",
+        "accepted_at": now_iso(),
+        "client_email": inv.get("client_email") or (user.get("email") or "").lower()}})
+    return {"ok": True, "store_id": inv["store_id"], "store_name": inv["store_name"]}
+
+
+@api.get("/my/catalog-stores")
+async def my_catalog_stores(user=Depends(get_current_user)):
+    ids = await client_store_ids(user)
+    stores = await db.stores.find({"id": {"$in": ids}, "deleted": {"$ne": True}}, {"_id": 0}).to_list(500)
+    for s in stores:
+        s["product_count"] = await db.products.count_documents({"store_id": s["id"], "deleted": {"$ne": True}})
+        s["online"] = store_online(s)
+        s.update(await rating_summary(s["id"]))
+    return stores
+
+
+# ------------------------------------------------------------------ Personal shopping catalog
+@api.post("/catalog")
+async def add_catalog_item(body: CatalogItemIn, user=Depends(get_current_user)):
+    allowed = await client_store_ids(user)
+    if body.store_id not in allowed:
+        raise HTTPException(status_code=403, detail="Você precisa de um convite para esta loja")
+    p = await db.products.find_one({"id": body.product_id, "deleted": {"$ne": True}}, {"_id": 0})
+    if not p or p["store_id"] != body.store_id:
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+    store = await db.stores.find_one({"id": body.store_id}, {"_id": 0}) or {}
+    doc = {"id": new_id("citem"), "client_user_id": user["user_id"], "store_id": body.store_id,
+           "store_name": store.get("name", ""), "product_id": p["id"], "name": p["name"],
+           "price": p.get("price", 0), "image": p.get("image", ""),
+           "category": p.get("category", "Outros"), "qty": max(1, body.qty),
+           "note": body.note or "", "added_at": now_iso()}
+    # upsert por (cliente, produto): se já existe, soma quantidade
+    existing = await db.catalog_items.find_one({"client_user_id": user["user_id"], "product_id": p["id"]})
+    if existing:
+        await db.catalog_items.update_one({"id": existing["id"]},
+                                          {"$set": {"qty": existing.get("qty", 1) + max(1, body.qty),
+                                                    "note": body.note or existing.get("note", "")}})
+        return await db.catalog_items.find_one({"id": existing["id"]}, {"_id": 0})
+    await db.catalog_items.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/catalog")
+async def list_catalog(store_id: str = Query(""), category: str = Query(""),
+                       q: str = Query(""), user=Depends(get_current_user)):
+    query = {"client_user_id": user["user_id"]}
+    if store_id:
+        query["store_id"] = store_id
+    if category and category != "Todos":
+        query["category"] = category
+    if q.strip():
+        query["name"] = {"$regex": re.escape(q.strip()), "$options": "i"}
+    items = await db.catalog_items.find(query, {"_id": 0}).sort("added_at", -1).to_list(2000)
+    # metadados para filtros do cliente
+    all_items = await db.catalog_items.find({"client_user_id": user["user_id"]}, {"_id": 0}).to_list(2000)
+    stores_meta = {}
+    cats = set()
+    for it in all_items:
+        stores_meta.setdefault(it["store_id"], {"store_id": it["store_id"], "store_name": it.get("store_name", ""), "count": 0})
+        stores_meta[it["store_id"]]["count"] += 1
+        cats.add(it.get("category", "Outros"))
+    total = round(sum(i["price"] * i["qty"] for i in items), 2)
+    return {"items": items, "total": total, "count": len(items),
+            "stores": list(stores_meta.values()), "categories": sorted(cats)}
+
+
+@api.put("/catalog/{item_id}")
+async def update_catalog_item(item_id: str, body: CatalogItemUpdate, user=Depends(get_current_user)):
+    it = await db.catalog_items.find_one({"id": item_id, "client_user_id": user["user_id"]})
+    if not it:
+        raise HTTPException(status_code=404, detail="Item não encontrado")
+    updates = {}
+    if body.qty is not None:
+        updates["qty"] = max(1, body.qty)
+    if body.note is not None:
+        updates["note"] = body.note
+    if updates:
+        await db.catalog_items.update_one({"id": item_id}, {"$set": updates})
+    return await db.catalog_items.find_one({"id": item_id}, {"_id": 0})
+
+
+@api.delete("/catalog/{item_id}")
+async def delete_catalog_item(item_id: str, user=Depends(get_current_user)):
+    await db.catalog_items.delete_one({"id": item_id, "client_user_id": user["user_id"]})
+    return {"ok": True}
+
+
+@api.get("/catalog/report.pdf")
+async def catalog_report_pdf(store_id: str = Query(""), category: str = Query(""),
+                             token: str = Query(""), authorization: Optional[str] = Header(None)):
+    # resolve user from Bearer header OR ?token=<session_token> (para abrir no navegador)
+    user = None
+    tok = ""
+    if authorization and authorization.startswith("Bearer "):
+        tok = authorization.split(" ", 1)[1].strip()
+    elif token:
+        tok = token
+    if tok:
+        sess = await db.user_sessions.find_one({"session_token": tok}, {"_id": 0})
+        if sess:
+            user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    query = {"client_user_id": user["user_id"]}
+    if store_id:
+        query["store_id"] = store_id
+    if category and category != "Todos":
+        query["category"] = category
+    items = await db.catalog_items.find(query, {"_id": 0}).sort("store_name", 1).to_list(2000)
+    label_parts = []
+    if store_id:
+        s = await db.stores.find_one({"id": store_id}, {"_id": 0, "name": 1})
+        label_parts.append(f"Loja: {(s or {}).get('name', store_id)}")
+    if category and category != "Todos":
+        label_parts.append(f"Categoria: {category}")
+    pdf = await run_in_threadpool(build_catalog_report_pdf, user.get("name", "Cliente"),
+                                  items, " · ".join(label_parts) or "Todos os itens")
+    return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": 'inline; filename="meu-catalogo.pdf"'})
+
+
+@api.post("/catalog/send")
+async def send_catalog_cart(body: CartSend, user=Depends(get_current_user)):
+    query = {"client_user_id": user["user_id"]}
+    if body.item_ids:
+        query["id"] = {"$in": body.item_ids}
+    items = await db.catalog_items.find(query, {"_id": 0}).to_list(2000)
+    if not items:
+        raise HTTPException(status_code=400, detail="Nenhum item selecionado")
+    # agrupa por loja => 1 pedido (e 1 PDF) por lojista
+    by_store: dict = {}
+    for it in items:
+        by_store.setdefault(it["store_id"], []).append(it)
+    if body.customer_whatsapp:
+        await db.users.update_one({"user_id": user["user_id"]},
+                                  {"$set": {"whatsapp": body.customer_whatsapp.strip()}})
+    created = []
+    for sid, sitems in by_store.items():
+        store = await db.stores.find_one({"id": sid, "deleted": {"$ne": True}}, {"_id": 0})
+        if not store:
+            continue
+        order_items = [{"product_id": i["product_id"], "name": i["name"],
+                        "price": i["price"], "qty": i["qty"]} for i in sitems]
+        subtotal = round(sum(i["price"] * i["qty"] for i in sitems), 2)
+        doc = {"id": new_id("order"), "token": uuid.uuid4().hex, "store_id": sid,
+               "store_name": store["name"], "store_whatsapp": store.get("whatsapp", ""),
+               "customer_user_id": user["user_id"],
+               "customer_name": body.customer_name or user.get("name", ""),
+               "items": order_items, "subtotal": subtotal, "discount": 0.0,
+               "coupon_code": "", "total": subtotal, "notes": body.notes or "",
+               "customer_whatsapp": (body.customer_whatsapp or "").strip(),
+               "status": "novo", "editable": True, "deleted": False,
+               "source": "catalog", "created_at": now_iso()}
+        await db.orders.insert_one(doc)
+        doc.pop("_id", None)
+        try:
+            await notify_order(doc, "created")
+        except Exception as e:
+            logger.warning(f"catalog send notify failed: {e}")
+        base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
+        created.append({"order_id": doc["id"], "store_id": sid, "store_name": store["name"],
+                        "total": subtotal,
+                        "pdf": f"{base}/api/orders/{doc['id']}/pdf?token={doc['token']}" if base else ""})
+    # remove itens enviados do catálogo pessoal
+    sent_ids = [i["id"] for i in items]
+    await db.catalog_items.delete_many({"id": {"$in": sent_ids}, "client_user_id": user["user_id"]})
+    return {"ok": True, "orders": created,
+            "message": f"{len(created)} pedido(s) enviados aos lojistas."}
+
+
+def build_catalog_report_pdf(customer_name, items, filter_label):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors as rc
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=18 * mm, bottomMargin=18 * mm,
+                            leftMargin=16 * mm, rightMargin=16 * mm)
+    styles = getSampleStyleSheet()
+    brand = rc.HexColor("#4A7C59")
+    title = ParagraphStyle("t", parent=styles["Title"], textColor=brand, fontSize=22)
+    h = ParagraphStyle("h", parent=styles["Normal"], fontSize=11, textColor=rc.HexColor("#4A4C48"))
+    sh = ParagraphStyle("sh", parent=styles["Normal"], fontSize=13, textColor=brand, fontName="Helvetica-Bold")
+    els = [Paragraph("Meu Catálogo de Compras", title),
+           Paragraph(f"<b>Cliente:</b> {customer_name}", h),
+           Paragraph(f"<b>Filtro:</b> {filter_label}", h), Spacer(1, 8 * mm)]
+    groups: dict = {}
+    for it in items:
+        groups.setdefault(it.get("store_name", "Loja"), []).append(it)
+    grand = 0.0
+    for store_name, gitems in groups.items():
+        els.append(Paragraph(f"🏪 {store_name}", sh))
+        els.append(Spacer(1, 2 * mm))
+        data = [["Produto", "Qtd", "Preço", "Subtotal"]]
+        stotal = 0.0
+        for it in gitems:
+            line = it["price"] * it["qty"]
+            stotal += line
+            data.append([it["name"], str(it["qty"]), f"R$ {it['price']:.2f}", f"R$ {line:.2f}"])
+        data.append(["", "", "Subtotal", f"R$ {stotal:.2f}"])
+        grand += stotal
+        t = Table(data, colWidths=[85 * mm, 18 * mm, 32 * mm, 33 * mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), brand),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rc.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("BACKGROUND", (0, -1), (-1, -1), rc.HexColor("#E9F0EC")),
+            ("GRID", (0, 0), (-1, -1), 0.5, rc.HexColor("#D1C9BE")),
+            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [rc.white, rc.HexColor("#FDFBF7")]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        els.append(t)
+        els.append(Spacer(1, 6 * mm))
+    els.append(Paragraph(f"<b>Total geral:</b> R$ {grand:.2f}", sh))
+    doc.build(els)
+    return buf.getvalue()
+
+
+# ------------------------------------------------------------------ AI translation (PT/EN/ES)
+LANG_NAMES = {"pt": "português brasileiro", "en": "English (US)", "es": "español latinoamericano"}
+
+
+@api.post("/translate")
+async def translate_texts(body: TranslateReq):
+    target = body.target if body.target in LANG_NAMES else "pt"
+    texts = [t for t in body.texts if isinstance(t, str) and t.strip()]
+    if target == "pt" or not texts:
+        return {"translations": {t: t for t in texts}}
+    import hashlib
+    result: dict = {}
+    pending: List[str] = []
+    for t in texts:
+        key = f"{target}:{hashlib.sha1(t.encode('utf-8')).hexdigest()}"
+        cached = await db.translations.find_one({"k": key}, {"_id": 0, "v": 1})
+        if cached:
+            result[t] = cached["v"]
+        else:
+            pending.append(t)
+    if pending:
+        try:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            system = (
+                f"You are a professional localizer for a retail marketplace app of the Triple Frontier "
+                f"(Foz do Iguaçu / Ciudad del Este / Puerto Iguazú). Translate each string to {LANG_NAMES[target]}. "
+                f"Use natural, colloquial commercial tone as a local shopper would say it. Keep product/brand "
+                f"names, emojis, numbers and currency intact. Return ONLY a valid JSON array of strings with the "
+                f"SAME length and order as the input, no extra text."
+            )
+            chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"i18n-{uuid.uuid4().hex[:8]}",
+                           system_message=system).with_model("gemini", "gemini-3-flash-preview")
+            resp = await chat.send_message(UserMessage(text=json.dumps(pending, ensure_ascii=False)))
+            raw = (resp or "").strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1].replace("json", "", 1).strip()
+            arr = json.loads(raw)
+            if isinstance(arr, list) and len(arr) == len(pending):
+                for src, tr in zip(pending, arr):
+                    tr = str(tr)
+                    result[src] = tr
+                    key = f"{target}:{hashlib.sha1(src.encode('utf-8')).hexdigest()}"
+                    await db.translations.update_one({"k": key}, {"$set": {"k": key, "v": tr}}, upsert=True)
+            else:
+                for src in pending:
+                    result[src] = src
+        except Exception as e:
+            logger.warning(f"translate failed: {e}")
+            for src in pending:
+                result.setdefault(src, src)
+    return {"translations": result}
 
 
 # ------------------------------------------------------------------ WhatsApp Cloud API

@@ -18,7 +18,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, fileUrl } from "@/src/api";
 import { Loading, EmptyState, ErrorState, Stars, useToast } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { useI18n } from "@/src/i18n";
+import { LangSelector } from "@/src/LangSelector";
+import { colors, spacing, radius, font, shadow, money, gradients } from "@/src/theme";
+import { LinearGradient } from "expo-linear-gradient";
 import { regionalImageFor, PRODUCT_PLACEHOLDER } from "@/src/images";
 
 const { width } = Dimensions.get("window");
@@ -43,6 +46,7 @@ export default function Marketplace() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { t } = useI18n();
   const [stores, setStores] = useState<Store[]>([]);
   const [featured, setFeatured] = useState<Store[]>([]);
   const [newProducts, setNewProducts] = useState<any[]>([]);
@@ -176,7 +180,7 @@ export default function Marketplace() {
         testID="search-input"
         value={query}
         onChangeText={setQuery}
-        placeholder="Buscar lojas ou produtos"
+        placeholder={t("Buscar lojas ou produtos")}
         placeholderTextColor={colors.muted}
         style={styles.searchInput}
         autoCapitalize="none"
@@ -217,7 +221,7 @@ export default function Marketplace() {
       )}
       {featured.length > 0 && (
         <View style={{ marginBottom: spacing.lg }}>
-          <Text style={styles.sectionTitle}>⭐ Destaques da fronteira</Text>
+          <Text style={styles.sectionTitle}>⭐ {t("Destaques da fronteira")}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
             {featured.map((s) => (
               <Pressable
@@ -266,7 +270,7 @@ export default function Marketplace() {
           </ScrollView>
         </View>
       )}
-      <Text style={styles.sectionTitle}>Todas as lojas</Text>
+      <Text style={styles.sectionTitle}>{t("Todas as lojas")}</Text>
     </View>
   );
 
@@ -338,11 +342,26 @@ export default function Marketplace() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.hello}>Lojas da Fronteira</Text>
-        <Text style={styles.subtitle}>Compre nas lojas da Tríplice Fronteira</Text>
+      <LinearGradient
+        colors={gradients.header}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.header, { paddingTop: insets.top + spacing.sm }]}
+      >
+        <View style={styles.topBar}>
+          <LangSelector variant="light" />
+        </View>
+        <View style={styles.brandRow}>
+          <View style={styles.brandBadge}>
+            <Ionicons name="basket" size={20} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.hello}>Lojas da Fronteira</Text>
+            <Text style={styles.subtitle}>{t("Tríplice Fronteira · compre sem sair de casa")}</Text>
+          </View>
+        </View>
         {searchBar}
-      </View>
+      </LinearGradient>
 
       {state === "loading" ? (
         <Loading />
@@ -376,20 +395,37 @@ export default function Marketplace() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  header: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  hello: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
-  subtitle: { fontSize: font.base, color: colors.onSurfaceTertiary, marginTop: 2 },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    ...shadow.card,
+  },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  topBar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: spacing.sm },
+  brandBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hello: { fontSize: font.xl, fontWeight: "800", color: "#fff" },
+  subtitle: { fontSize: font.sm, color: "rgba(255,255,255,0.85)", marginTop: 2 },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
+    backgroundColor: "#fff",
+    borderWidth: 0,
     borderColor: colors.border,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
-    height: 46,
-    marginTop: spacing.md,
+    height: 48,
+    marginTop: spacing.lg,
+    ...shadow.card,
   },
   searchInput: { flex: 1, fontSize: font.base, color: colors.onSurface, paddingVertical: 0 },
   sectionTitle: {

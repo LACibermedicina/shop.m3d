@@ -1,29 +1,38 @@
 import { useState, useCallback } from "react";
-import { View, Text, StyleSheet, FlatList, Pressable, Modal } from "react-native";
+import { View, Text, StyleSheet, FlatList, Pressable, Modal, KeyboardAvoidingView, Platform } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
-import { Loading, EmptyState, ErrorState, Avatar, useToast } from "@/src/ui";
+import { useAuth } from "@/src/auth";
+import { Loading, EmptyState, ErrorState, Avatar, Button, Field, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow } from "@/src/theme";
 
-const ROLES = [
+const BASE_ROLES = [
   { key: "cliente", label: "Cliente" },
   { key: "lojista", label: "Lojista" },
   { key: "admin", label: "Admin" },
 ];
+const MASTER_ROLE = { key: "master", label: "Master" };
 
 export default function AdminUsers() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  const { user: me } = useAuth();
+  const isMaster = me?.role === "master";
+  const ROLES = isMaster ? [...BASE_ROLES, MASTER_ROLE] : BASE_ROLES;
   const [users, setUsers] = useState<any[]>([]);
   const [stores, setStores] = useState<any[]>([]);
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [storePickUser, setStorePickUser] = useState<any>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState("cliente");
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [u, s] = await Promise.all([api.users(), api.stores()]);
+      const [u, s] = await Promise.all([api.users(), api.stores().catch(() => [])]);
       setUsers(u);
       setStores(s);
       setState("done");
@@ -56,12 +65,55 @@ export default function AdminUsers() {
     }
   };
 
+  const createUser = async () => {
+    if (!newEmail.trim()) {
+      toast("Informe o e-mail", "info");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.masterCreateUser(newEmail.trim(), newRole);
+      setCreateOpen(false);
+      setNewEmail("");
+      setNewRole("cliente");
+      toast("Usuário criado/atualizado", "success");
+      await load();
+    } catch (e: any) {
+      toast(e.message || "Falha ao criar", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteUser = async (u: any) => {
+    try {
+      await api.masterDeleteUser(u.user_id);
+      setUsers((prev) => prev.filter((x) => x.user_id !== u.user_id));
+      toast("Usuário excluído", "success");
+    } catch (e: any) {
+      toast(e.message || "Falha ao excluir", "error");
+    }
+  };
+
   const storeName = (id?: string | null) => stores.find((s) => s.id === id)?.name;
+
+  const roleColor = (r: string) =>
+    r === "master" ? colors.brandSecondary : r === "admin" ? colors.warning : r === "lojista" ? colors.brandPrimary : colors.muted;
 
   return (
     <View style={styles.container}>
       <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>Usuários</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>{isMaster ? "Usuários (Master)" : "Meus lojistas"}</Text>
+          <Text style={styles.subtitle}>
+            {isMaster ? "Gerencie clientes, lojistas e administradores" : "Lojistas vinculados a você"}
+          </Text>
+        </View>
+        {isMaster && (
+          <Pressable testID="master-add-user" onPress={() => setCreateOpen(true)} style={styles.addBtn}>
+            <Ionicons name="person-add" size={18} color="#fff" />
+          </Pressable>
+        )}
       </View>
 
       {state === "loading" ? (
@@ -89,25 +141,59 @@ export default function AdminUsers() {
                     <Text style={styles.storeTag}>🏪 {storeName(item.store_id) || "Loja"}</Text>
                   )}
                 </View>
-              </View>
-              <View style={styles.roleRow}>
-                {ROLES.map((r) => (
-                  <Pressable
-                    key={r.key}
-                    testID={`set-role-${r.key}-${item.user_id}`}
-                    onPress={() => onRolePress(item, r.key)}
-                    style={[styles.roleChip, item.role === r.key && styles.roleChipActive]}
-                  >
-                    <Text style={[styles.roleChipText, item.role === r.key && { color: "#fff", fontWeight: "700" }]}>
-                      {r.label}
-                    </Text>
+                <View style={[styles.rolePill, { backgroundColor: roleColor(item.role) }]}>
+                  <Text style={styles.rolePillText}>{item.role}</Text>
+                </View>
+                {isMaster && item.email !== me?.email && (
+                  <Pressable testID={`delete-user-${item.user_id}`} onPress={() => deleteUser(item)} style={styles.delBtn}>
+                    <Ionicons name="trash-outline" size={18} color={colors.error} />
                   </Pressable>
-                ))}
+                )}
               </View>
+              {isMaster && (
+                <View style={styles.roleRow}>
+                  {ROLES.map((r) => (
+                    <Pressable
+                      key={r.key}
+                      testID={`set-role-${r.key}-${item.user_id}`}
+                      onPress={() => onRolePress(item, r.key)}
+                      style={[styles.roleChip, item.role === r.key && styles.roleChipActive]}
+                    >
+                      <Text style={[styles.roleChipText, item.role === r.key && { color: "#fff", fontWeight: "700" }]}>
+                        {r.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
             </View>
           )}
         />
       )}
+
+      <Modal visible={createOpen} transparent animationType="slide" onRequestClose={() => setCreateOpen(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Novo usuário</Text>
+            <Text style={styles.modalSub}>Cadastre por e-mail e defina o papel</Text>
+            <Field testID="new-user-email" label="E-mail" value={newEmail} onChangeText={setNewEmail} placeholder="email@exemplo.com" autoCapitalize="none" />
+            <View style={[styles.roleRow, { marginBottom: spacing.lg }]}>
+              {ROLES.map((r) => (
+                <Pressable
+                  key={r.key}
+                  testID={`new-user-role-${r.key}`}
+                  onPress={() => setNewRole(r.key)}
+                  style={[styles.roleChip, newRole === r.key && styles.roleChipActive]}
+                >
+                  <Text style={[styles.roleChipText, newRole === r.key && { color: "#fff", fontWeight: "700" }]}>{r.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Button title="Criar usuário" onPress={createUser} loading={saving} testID="create-user-button" />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <Modal visible={!!storePickUser} transparent animationType="slide" onRequestClose={() => setStorePickUser(null)}>
         <View style={styles.modalOverlay}>
@@ -144,8 +230,28 @@ export default function AdminUsers() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  headerBar: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  headerBar: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, flexDirection: "row", alignItems: "center", gap: spacing.md },
   title: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
+  subtitle: { fontSize: font.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  addBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.card,
+  },
+  rolePill: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
+  rolePillText: { color: "#fff", fontSize: 10, fontWeight: "800", textTransform: "uppercase" },
+  delBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   card: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.lg,

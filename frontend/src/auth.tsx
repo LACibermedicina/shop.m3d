@@ -11,7 +11,7 @@ export type User = {
   email: string;
   name: string;
   picture?: string;
-  role: "admin" | "lojista" | "cliente";
+  role: "admin" | "lojista" | "cliente" | "master";
   store_id?: string | null;
   whatsapp?: string;
 };

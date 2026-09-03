@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { api, fileUrl } from "@/src/api";
-import { useCart } from "@/src/cart";
+import { useI18n } from "@/src/i18n";
 import { Loading, EmptyState, ErrorState, Chip, Stars, Button, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow, money, CATEGORIES } from "@/src/theme";
 import { regionalImageFor, PRODUCT_PLACEHOLDER } from "@/src/images";
@@ -43,7 +43,8 @@ export default function StoreCatalog() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
-  const { add, count } = useCart();
+  const { t } = useI18n();
+  const [catalogCount, setCatalogCount] = useState(0);
   const [store, setStore] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
@@ -110,18 +111,16 @@ export default function StoreCatalog() {
     }
   };
 
-  const handleAdd = (p: any) => {
+  const handleAdd = async (p: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    add({
-      product_id: p.id,
-      name: p.name,
-      price: p.price,
-      image: p.image,
-      store_id: store.id,
-      store_name: store.name,
-      store_whatsapp: store.whatsapp,
-    });
-    toast(`${p.name} adicionado à sacola`, "success");
+    setCatalogCount((c) => c + 1);
+    try {
+      await api.addCatalogItem(store.id, p.id, 1);
+      toast(`${p.name} ${t("adicionado ao meu catálogo")}`, "success");
+    } catch (e: any) {
+      setCatalogCount((c) => Math.max(0, c - 1));
+      toast(e.message || "Falha ao adicionar", "error");
+    }
   };
 
   const submitReview = async () => {
@@ -298,14 +297,14 @@ export default function StoreCatalog() {
         }
       />
 
-      {count > 0 && (
+      {catalogCount > 0 && (
         <Pressable
           testID="go-to-cart-button"
-          onPress={() => router.push("/(customer)/cart")}
+          onPress={() => router.push("/(customer)/catalog")}
           style={[styles.cartCta, { bottom: insets.bottom + spacing.lg }]}
         >
-          <Ionicons name="bag-handle" size={20} color="#fff" />
-          <Text style={styles.cartCtaText}>Ver sacola ({count})</Text>
+          <Ionicons name="albums" size={20} color="#fff" />
+          <Text style={styles.cartCtaText}>{t("Ver meu catálogo")} ({catalogCount})</Text>
         </Pressable>
       )}
 
