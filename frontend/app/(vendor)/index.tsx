@@ -94,6 +94,12 @@ export default function VendorOrders() {
     await refresh();
   };
 
+  const [clientFilter, setClientFilter] = useState<string>("");
+  const clientNames = Array.from(
+    new Map((orders || []).map((o: any) => [o.customer_user_id, o.customer_name || "Cliente"])).entries()
+  ).map(([uid, name]) => ({ uid, name }));
+  const shownOrders = clientFilter ? orders.filter((o: any) => o.customer_user_id === clientFilter) : orders;
+
   const active = orders.filter((o) => ["novo", "editando", "pronto"].includes(o.status)).length;
   const revenue = orders.filter((o) => o.status !== "cancelado").reduce((a, o) => a + o.total, 0);
 
@@ -142,6 +148,23 @@ export default function VendorOrders() {
           <Text style={styles.metricLabel}>Faturamento</Text>
         </View>
       </View>
+      {clientNames.length > 0 && (
+        <View>
+          <Text style={styles.groupLabel}>{t("Filtrar por cliente")}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.clientRow}>
+            <Chip label={t("Todos")} active={!clientFilter} onPress={() => setClientFilter("")} testID="client-all" />
+            {clientNames.map((c) => (
+              <Chip
+                key={c.uid}
+                testID={`client-${c.uid}`}
+                label={c.name}
+                active={clientFilter === c.uid}
+                onPress={() => setClientFilter(c.uid)}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
     </View>
   );
 
@@ -226,7 +249,7 @@ export default function VendorOrders() {
         <Loading />
       ) : (
         <FlatList
-          data={orders}
+          data={shownOrders}
           keyExtractor={(o) => o.id}
           ListHeaderComponent={header}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}
@@ -273,6 +296,8 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   topBar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: spacing.sm },
+  groupLabel: { fontSize: font.sm, fontWeight: "700", color: colors.onSurfaceTertiary, marginTop: spacing.md, marginBottom: spacing.xs },
+  clientRow: { gap: spacing.sm, paddingBottom: spacing.sm },
   title: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
   metrics: { flexDirection: "row", gap: spacing.md, marginBottom: spacing.lg },
   controlCard: {

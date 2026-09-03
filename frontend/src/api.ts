@@ -146,6 +146,8 @@ export const api = {
     apiRequest(`/orders/${id}/status`, { method: "PUT", body: { status } }),
   pdfUrl: (id: string, token: string) =>
     `${BASE}/api/orders/${id}/pdf?token=${token}`,
+  orderWaLinks: (id: string, token?: string) =>
+    apiRequest(`/orders/${id}/wa-links${token ? `?token=${token}` : ""}`),
 
   metrics: () => apiRequest("/admin/metrics"),
   users: () => apiRequest("/admin/users"),

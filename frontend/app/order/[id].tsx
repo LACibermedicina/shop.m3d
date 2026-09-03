@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
+import { useI18n } from "@/src/i18n";
 import { Loading, ErrorState, Button, StatusBadge, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
 
@@ -30,9 +31,11 @@ export default function OrderDetail() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const { user } = useAuth();
+  const { t } = useI18n();
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [notifs, setNotifs] = useState<any[]>([]);
+  const [waLinks, setWaLinks] = useState<any>(null);
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [saving, setSaving] = useState(false);
 
@@ -43,6 +46,9 @@ export default function OrderDetail() {
       setItems(o.items);
       try {
         setNotifs(await api.orderNotifications(id, token));
+      } catch {}
+      try {
+        setWaLinks(await api.orderWaLinks(id, token));
       } catch {}
       setState("done");
     } catch {
@@ -64,8 +70,6 @@ export default function OrderDetail() {
   const isOwner = user?.user_id === order.customer_user_id;
   const canEdit = isVendor || isAdmin || (isOwner && order.editable);
 
-  const total = items.reduce((a, i) => a + i.price * i.qty, 0);
-
   const changeQty = (pid: string, delta: number) => {
     setItems((prev) =>
       prev
@@ -80,6 +84,17 @@ export default function OrderDetail() {
   };
 
   const canPrice = isVendor || isAdmin;
+
+  const toggleAvail = (pid: string) => {
+    setItems((prev) => prev.map((i) => (i.product_id === pid ? { ...i, available: i.available === false ? true : false } : i)));
+  };
+
+  const total = items.reduce((a, i) => a + (i.available === false ? 0 : i.price * i.qty), 0);
+
+  const openWa = (link?: string) => {
+    if (link) Linking.openURL(link);
+    else toast(t("Sem número de WhatsApp cadastrado"), "info");
+  };
 
   const save = async () => {
     setSaving(true);
@@ -148,7 +163,14 @@ export default function OrderDetail() {
               testID={`order-item-${it.product_id}`}
             >
               <View style={{ flex: 1 }}>
-                <Text style={styles.itemName}>{it.name}</Text>
+                <View style={styles.nameRow}>
+                  <Text style={[styles.itemName, it.available === false && styles.unavailName]}>{it.name}</Text>
+                  {it.available === false && (
+                    <View style={styles.unavailBadge}>
+                      <Text style={styles.unavailText}>{t("Indisponível")}</Text>
+                    </View>
+                  )}
+                </View>
                 {canPrice ? (
                   <View style={styles.priceEditRow}>
                     <Text style={styles.priceCurrency}>R$</Text>
@@ -159,6 +181,17 @@ export default function OrderDetail() {
                       keyboardType="decimal-pad"
                       style={styles.priceInput}
                     />
+                    <Pressable
+                      testID={`order-avail-${it.product_id}`}
+                      onPress={() => toggleAvail(it.product_id)}
+                      style={styles.availBtn}
+                    >
+                      <Ionicons
+                        name={it.available === false ? "eye-off-outline" : "eye-outline"}
+                        size={18}
+                        color={it.available === false ? colors.error : colors.brandPrimary}
+                      />
+                    </Pressable>
                   </View>
                 ) : (
                   <Text style={styles.itemPrice}>{money(it.price)}</Text>
@@ -248,6 +281,18 @@ export default function OrderDetail() {
         {!!user && (
           <Button title="Reenviar aviso (WhatsApp/e-mail)" icon="paper-plane-outline" variant="secondary" onPress={resend} testID="resend-order-button" style={{ marginBottom: spacing.md }} />
         )}
+        {isOwner && waLinks?.vendor_link ? (
+          <Pressable testID="wa-vendor-button" onPress={() => openWa(waLinks.vendor_link)} style={styles.waBtn}>
+            <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+            <Text style={styles.waBtnText}>{t("Enviar pedido ao lojista")}</Text>
+          </Pressable>
+        ) : null}
+        {(isVendor || isAdmin) && waLinks ? (
+          <Pressable testID="wa-customer-button" onPress={() => openWa(waLinks.customer_link)} style={styles.waBtn}>
+            <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+            <Text style={styles.waBtnText}>{t("Avisar cliente no WhatsApp")}</Text>
+          </Pressable>
+        ) : null}
         <Button title="Abrir PDF do pedido" icon="document-text-outline" variant="outline" onPress={openPdf} testID="open-pdf-button" />
       </ScrollView>
     </View>
@@ -289,6 +334,30 @@ const styles = StyleSheet.create({
   itemPrice: { fontSize: font.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
   priceEditRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   priceCurrency: { fontSize: font.sm, color: colors.onSurfaceTertiary, fontWeight: "700" },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexWrap: "wrap" },
+  unavailName: { textDecorationLine: "line-through", color: colors.onSurfaceTertiary },
+  unavailBadge: { backgroundColor: "rgba(198,40,40,0.12)", paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
+  unavailText: { fontSize: 10, fontWeight: "800", color: colors.error, textTransform: "uppercase" },
+  availBtn: {
+    marginLeft: spacing.xs,
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  waBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: "#25D366",
+    marginBottom: spacing.md,
+  },
+  waBtnText: { color: "#fff", fontWeight: "800", fontSize: font.base },
   priceInput: {
     minWidth: 70,
     borderWidth: 1,

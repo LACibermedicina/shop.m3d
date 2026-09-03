@@ -153,6 +153,7 @@ class OrderItem(BaseModel):
     name: str
     price: float
     qty: int
+    available: bool = True
 
 
 class OrderIn(BaseModel):
@@ -862,7 +863,7 @@ async def update_order_items(order_id: str, body: OrderItemsUpdate, user=Depends
     is_owner = user["user_id"] == o["customer_user_id"]
     if not (is_admin or is_vendor or (is_owner and o.get("editable"))):
         raise HTTPException(status_code=403, detail="Edição não permitida")
-    total = round(sum(i.price * i.qty for i in body.items), 2)
+    total = round(sum(i.price * i.qty for i in body.items if getattr(i, "available", True)), 2)
     await db.orders.update_one({"id": order_id},
                                {"$set": {"items": [i.dict() for i in body.items], "total": total}})
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
@@ -900,6 +901,50 @@ async def order_pdf(order_id: str, token: str = Query(...)):
     pdf = await run_in_threadpool(build_pdf, o)
     return StreamingResponse(io.BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="pedido-{order_id}.pdf"'})
+
+
+def _wa_me(number: str, text: str) -> str:
+    from urllib.parse import quote
+    digits = re.sub(r"\D", "", number or "")
+    if not digits:
+        return ""
+    return f"https://wa.me/{digits}?text={quote(text)}"
+
+
+@api.get("/orders/{order_id}/wa-links")
+async def order_wa_links(order_id: str, token: Optional[str] = Query(None),
+                         authorization: Optional[str] = Header(None)):
+    """Click-to-chat (wa.me) links to notify vendor or client via the WhatsApp app.
+    Alternative delivery path when Cloud API sending is unavailable (SMB numbers)."""
+    o = await db.orders.find_one({"id": order_id, "deleted": {"$ne": True}}, {"_id": 0})
+    if not o:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+    authorized = bool(token and token == o["token"])
+    if not authorized and authorization and authorization.startswith("Bearer "):
+        sess = await db.user_sessions.find_one({"session_token": authorization.split(" ", 1)[1].strip()}, {"_id": 0})
+        if sess:
+            u = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+            if u and (u["role"] in ("admin", "master") or u["user_id"] == o["customer_user_id"]
+                      or (u["role"] == "lojista" and u.get("store_id") == o["store_id"])):
+                authorized = True
+    if not authorized:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    store = await db.stores.find_one({"id": o["store_id"]}, {"_id": 0}) or {}
+    link = _order_link(o)
+    link_txt = f"\n{link}" if link else ""
+    to_vendor = (f"*Pedido — {o['store_name']}*\nCliente: {o.get('customer_name','')}\n"
+                 f"{_order_lines(o)}\nTotal: R$ {o['total']:.2f}{link_txt}")
+    to_customer = (f"Olá {o.get('customer_name','')}! Sobre seu pedido em {o['store_name']}:\n"
+                   f"{_order_lines(o)}\nTotal: R$ {o['total']:.2f}{link_txt}")
+    return {
+        # cliente abre para enviar o pedido ao lojista
+        "vendor_link": _wa_me(store.get("whatsapp", ""), to_vendor),
+        "vendor_number": re.sub(r"\D", "", store.get("whatsapp", "") or ""),
+        # lojista abre para avisar o cliente
+        "customer_link": _wa_me(o.get("customer_whatsapp", ""), to_customer),
+        "customer_number": re.sub(r"\D", "", o.get("customer_whatsapp", "") or ""),
+        "pdf": link,
+    }
 
 
 def build_pdf(o):
