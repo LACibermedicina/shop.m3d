@@ -162,7 +162,9 @@ export default function Login() {
                           active={role === r}
                           onPress={() => {
                             setRole(r);
-                            setEmail(`${r}@feira.test`);
+                            setEmail((prev) =>
+                              prev.endsWith("@feira.test") || prev === "" ? `${r}@feira.test` : prev
+                            );
                           }}
                         />
                       ))}

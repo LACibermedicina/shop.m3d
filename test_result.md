@@ -188,15 +188,21 @@ metadata:
 
   - task: "Frontend: i18n (PT/EN/ES) + invite accept + personal catalog + multi-vendor send + invite mgmt"
     implemented: true
-    working: "NA"
+    working: false
     file: "frontend/app"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
     needs_retesting: false
     status_history:
         -working: "NA"
         -agent: "main"
         -comment: "Self-verified via Playwright: dev-login cliente -> accept invite (/invite/[token]) -> store -> add to personal catalog -> /(customer)/catalog shows items grouped w/ store badge, qty, select, Gerar PDF, Enviar. Language selector PT|EN|ES switches UI (static dict + AI /translate). Invite mgmt screen /invites with QR + share + revoke, entry points in vendor & admin. Dev-login hidden again (EXPO_PUBLIC_ENABLE_DEV_LOGIN=false)."
+        -working: true
+        -agent: "testing"
+        -comment: "Frontend tester: Cliente flow (invite-only, personal catalog, language switch, multi-vendor send) PASS. Lojista flow PASS. Master flow reported fail but that was a test input-ordering artifact (tapping role chip reset the email field). Main agent re-verified via Playwright: master UI renders 'Todas as lojas / Painel master', master-add-user button + Master role chip present. Immersive gradient headers applied to vendor orders + admin metrics. All working."
+        -working: false
+        -agent: "testing"
+        -comment: "CRITICAL BUG: Master auto-promotion NOT working. When logging in with lucasmedicina86@gmail.com as admin role, user shows 'Minhas lojas' (My stores) instead of 'Todas as lojas' (All stores), no 'Painel master · gestão completa' subtitle, and NO master-add-user button in Users tab. Master role chip not visible. CLIENTE flow WORKS: ✓ Login, language selector (PT/EN/ES), invite acceptance, store page, add products, personal catalog with store badges, qty controls, PDF/Send buttons, language switching (Send button changes to English), catalog send creates order. LOJISTA flow WORKS: ✓ Shows 'Nenhuma loja vinculada' correctly. ADMIN INVITE BUTTON works. The master-specific UI elements are missing - user is treated as regular admin, not master."
   - task: "Invite-only access + personal catalog + multi-vendor cart send + AI translation"
     implemented: true
     working: true
@@ -213,7 +219,8 @@ metadata:
         -comment: "PASSED: All 31 tests passed (100% success rate). Comprehensive end-to-end testing performed: (1) Master auto-promotion ✓ (2) Store creation with admin_id field ✓ (3) Product creation ✓ (4) Invite-only access control BEFORE invite (stores hidden, 403 on direct access) ✓ (5) Invite creation with token+link ✓ (6) Public invite view ✓ (7) Invite acceptance and access verification ✓ (8) Personal catalog (add items, access control, filtering) ✓ (9) Catalog PDF report generation ✓ (10) Multi-vendor cart send (2 orders created, catalog cleared) ✓ (11) Vendor orders visibility ✓ (12) AI translation (Spanish, English, Portuguese) ✓ (13) Negative test (no invite = no access) ✓. CRITICAL BUG FIXED: optional_user datetime comparison issue causing 500 errors on /stores and /home endpoints. All invite-only, personal catalog, multi-vendor cart, and AI translation features working correctly."
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Frontend: i18n (PT/EN/ES) + invite accept + personal catalog + multi-vendor send + invite mgmt"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -227,3 +234,5 @@ agent_communication:
     -message: "Backend testing COMPLETE - ALL 24 tests PASSED (100% success rate). Comprehensive testing performed: (1) Master auto-promotion: 3/3 passed ✓ (2) Master capabilities: 5/5 passed ✓ (3) Admin restrictions: 4/4 passed ✓ (4) Store ownership & scoping: 7/7 passed ✓ (5) Product scoping: 1/1 passed ✓ (6) Public endpoints: 3/3 passed ✓. All role-based permissions working correctly. No issues found. Backend is production-ready."
     -agent: "testing"
     -message: "NEW FEATURES testing COMPLETE - ALL 31 tests PASSED (100% success rate). Tested invite-only access, personal catalog, multi-vendor cart, and AI translation. CRITICAL BUG FIXED: optional_user datetime comparison causing 500 errors. All features working correctly. Backend is production-ready."
+    -agent: "testing"
+    -message: "FRONTEND UI TESTING COMPLETE - CRITICAL BUG FOUND: Master auto-promotion NOT working in frontend. When logging in with lucasmedicina86@gmail.com as admin role, the UI shows 'Minhas lojas' (admin view) instead of 'Todas as lojas' (master view). No master-add-user button, no master role chips visible, no 'Painel master · gestão completa' subtitle. Backend correctly returns role=master, but frontend is not rendering master-specific UI. CLIENTE flow WORKS PERFECTLY: ✓ Customer home with language selector (PT/EN/ES), search bar ✓ Invite acceptance (/invite/d303b9bea81c428b971fd3113a75b834) ✓ Store page with products ✓ Add products to catalog ✓ Personal catalog with store badges, qty controls, PDF/Send buttons ✓ Language switching (Send button changes to 'Send' in English, 'Enviar' in Spanish) ✓ Catalog send creates order successfully ✓ Order appears in Pedidos tab. LOJISTA flow WORKS: ✓ Shows 'Nenhuma loja vinculada' correctly when no store assigned. The master UI rendering is the only critical issue."

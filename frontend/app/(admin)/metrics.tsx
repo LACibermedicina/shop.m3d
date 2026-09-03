@@ -2,10 +2,13 @@ import { useState, useCallback } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
+import { useI18n } from "@/src/i18n";
+import { LangSelector } from "@/src/LangSelector";
 import { Loading, ErrorState, Chip } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { colors, spacing, radius, font, shadow, money, gradients } from "@/src/theme";
 
 const CARDS = [
   { key: "revenue", label: "Faturamento", icon: "cash-outline", color: colors.brandPrimary, isMoney: true },
@@ -17,6 +20,7 @@ const CARDS = [
 
 export default function AdminMetrics() {
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const [metrics, setMetrics] = useState<any>(null);
   const [notifs, setNotifs] = useState<any[]>([]);
   const [waLog, setWaLog] = useState<any[]>([]);
@@ -59,10 +63,13 @@ export default function AdminMetrics() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>Métricas</Text>
-        <Text style={styles.subtitle}>Visão geral das lojas</Text>
-      </View>
+      <LinearGradient colors={gradients.header} style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.topBar}>
+          <LangSelector variant="light" />
+        </View>
+        <Text style={styles.title}>{t("Métricas")}</Text>
+        <Text style={styles.subtitle}>{t("Visão geral das lojas")}</Text>
+      </LinearGradient>
       <ScrollView
         contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandPrimary} />}
@@ -115,7 +122,7 @@ export default function AdminMetrics() {
 
         <View style={styles.notifHeader}>
           <Text style={styles.notifTitle}>Comandos por WhatsApp</Text>
-          <Text style={styles.subtitle}>Cadastros e alterações recebidos no número root</Text>
+          <Text style={styles.notifSub}>Cadastros e alterações recebidos no número root</Text>
         </View>
         {waLog.length === 0 ? (
           <Text style={styles.notifEmpty}>Nenhum comando recebido ainda.</Text>
@@ -163,9 +170,16 @@ export default function AdminMetrics() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  headerBar: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
-  subtitle: { fontSize: font.base, color: colors.onSurfaceTertiary, marginTop: 2 },
+  headerBar: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    ...shadow.card,
+  },
+  topBar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: spacing.sm },
+  title: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
+  subtitle: { fontSize: font.base, color: "rgba(255,255,255,0.85)", marginTop: 2 },
   hero: {
     backgroundColor: colors.brandPrimary,
     borderRadius: radius.lg,
@@ -198,6 +212,7 @@ const styles = StyleSheet.create({
   cardLabel: { fontSize: font.base, color: colors.onSurfaceTertiary, marginTop: 2 },
   notifHeader: { marginTop: spacing.xl, marginBottom: spacing.sm },
   notifTitle: { fontSize: font.xl, fontWeight: "800", color: colors.onSurface },
+  notifSub: { fontSize: font.base, color: colors.onSurfaceTertiary, marginTop: 2 },
   filterRow: { gap: spacing.sm, paddingBottom: spacing.md },
   notifEmpty: { fontSize: font.base, color: colors.onSurfaceTertiary, paddingVertical: spacing.md },
   notifCard: {

@@ -14,18 +14,22 @@ import {
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
+import { useI18n } from "@/src/i18n";
+import { LangSelector } from "@/src/LangSelector";
 import { useVendorOrders } from "@/src/vendorOrders";
 import { Loading, EmptyState, StatusBadge, Button, Field, Chip, useToast } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { colors, spacing, radius, font, shadow, money, gradients } from "@/src/theme";
 
 export default function VendorOrders() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const { user } = useAuth();
+  const { t } = useI18n();
   const { orders, loading, newCount, refresh, markSeen, storeOpen, savingOpen, toggleOpen } =
     useVendorOrders();
   const seenTimer = useRef<any>(null);
@@ -198,9 +202,9 @@ export default function VendorOrders() {
   if (!user?.store_id) {
     return (
       <View style={styles.container}>
-        <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
-          <Text style={styles.title}>Pedidos</Text>
-        </View>
+        <LinearGradient colors={gradients.header} style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
+          <Text style={styles.title}>{t("Pedidos")}</Text>
+        </LinearGradient>
         <EmptyState
           icon="storefront-outline"
           title="Nenhuma loja vinculada"
@@ -212,9 +216,12 @@ export default function VendorOrders() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>Pedidos</Text>
-      </View>
+      <LinearGradient colors={gradients.header} style={[styles.headerBar, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.topBar}>
+          <LangSelector variant="light" />
+        </View>
+        <Text style={styles.title}>{t("Pedidos")}</Text>
+      </LinearGradient>
       {loading ? (
         <Loading />
       ) : (
@@ -258,8 +265,15 @@ export default function VendorOrders() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  headerBar: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
+  headerBar: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    ...shadow.card,
+  },
+  topBar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: spacing.sm },
+  title: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
   metrics: { flexDirection: "row", gap: spacing.md, marginBottom: spacing.lg },
   controlCard: {
     backgroundColor: colors.surfaceSecondary,
