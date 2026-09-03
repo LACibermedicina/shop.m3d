@@ -1,12 +1,12 @@
-# M3D.Pro Catálogo v0.01
+# SHOP.M3D.pro (versão: catalogo)
 
-Uma plataforma de **lojas virtuais organizadas por áreas de interesse e grupos de usuários**, desenvolvida como a versão inicial do ecossistema **shop.m3d.pro**.
+Uma plataforma de **lojas virtuais organizadas por áreas de interesse e grupos de usuários**, desenvolvida como a versão inicial do ecossistema **M3D.pro**. O projeto em si chama-se **SHOP** e esta versão é identificada como **catalogo**.
 
 ## 🎯 Visão Geral
 
-O **M3D.Pro Catálogo** é um aplicativo móvel e web que funciona como uma **rede de indicações baseada em grupos de interesse**, conectando clientes e lojistas de forma vinculativa. Nosso objetivo é humanizar o comércio eletrônico, protegendo tanto clientes quanto vendedores do distanciamento causado pelos modelos tradicionais de consumo.
+O **SHOP.M3D.pro (versão: catalogo)** é um aplicativo móvel e web que funciona como uma **rede de indicações baseada em grupos de interesse**, conectando clientes e lojistas de forma vinculativa. Nosso objet[...] 
 
-### Por Que M3D.Pro?
+### Por Que SHOP.M3D.pro?
 
 - 🤝 **Relacionamento Direto**: Conexão próxima entre clientes e vendedores, baseada em confiança
 - 🎯 **Grupos de Interesse**: Organização customizada que facilita o encontro de produtos relevantes
@@ -87,12 +87,12 @@ Para informações mais detalhadas, consulte:
 
 ## 🔄 Ciclo de Vida do Projeto
 
-### Versão 0.01 (Atual - Catálogo)
+### Versão catalogo (0.01)
 Implementação inicial com:
 - Prototipagem de interface
 - Modelo básico de dados
 - Estrutura de grupos de interesse
-- Catalogo de produtos inicial
+- Catálogo de produtos inicial
 
 ### Próximas Versões (Roadmap)
 - Sistema de pagamento integrado
@@ -122,8 +122,8 @@ Este projeto está sob a licença MIT. Veja [LICENSE](./LICENSE) para mais detal
 
 ## 🙏 Agradecimentos
 
-Agradecemos a todos os contribuidores e membros da comunidade que ajudam a tornar o M3D.Pro uma realidade.
+Agradecemos a todos os contribuidores e membros da comunidade que ajudam a tornar o M3D.pro uma realidade.
 
 ---
 
-**Versão**: 0.01 | **Última atualização**: Setembro 2026
+**Versão**: catalogo (0.01) | **Última atualização**: Setembro 2026
