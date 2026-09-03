@@ -501,5 +501,233 @@ def main():
     success = result.summary()
     return 0 if success else 1
 
+def test_order_editing_regression():
+    """
+    Regression test for ORDER EDITING + client notification
+    Tests:
+    1. Master creates store and product
+    2. Invite and accept as cliente
+    3. Create order as cliente
+    4. Edit order as master (change items, price, qty)
+    5. Verify client notification was recorded
+    6. Test permission (other cliente cannot edit)
+    7. Test status change (pronto = not editable)
+    8. Test GET order as master and as owner cliente
+    """
+    print(f"\n{BLUE}{'='*60}{RESET}")
+    print(f"{BLUE}ORDER EDITING REGRESSION TEST{RESET}")
+    print(f"{BLUE}{'='*60}{RESET}\n")
+    
+    result = TestResult()
+    
+    # Step 1: Master dev-login
+    print(f"\n{YELLOW}Step 1: Master login{RESET}")
+    master_login = dev_login(MASTER_EMAIL, "master", "Master User")
+    if "error" in master_login:
+        result.add_fail("Master login", master_login["error"])
+        result.summary()
+        return 1
+    
+    master_token = master_login["token"]
+    master_user = master_login["user"]
+    result.add_pass(f"Master login (email={MASTER_EMAIL}, role={master_user.get('role')})")
+    
+    # Step 2: Create store
+    print(f"\n{YELLOW}Step 2: Create store{RESET}")
+    store_data = {"name": "EditReg Store", "whatsapp": "5545000000099"}
+    store_resp = api_call("POST", "/stores", master_token, store_data)
+    if not store_resp.get("success"):
+        result.add_fail("Create store", f"Status {store_resp.get('status_code')}, {store_resp.get('error', '')}")
+        result.summary()
+        return 1
+    
+    store_id = store_resp["data"]["id"]
+    admin_id = store_resp["data"].get("admin_id")
+    result.add_pass(f"Create store (id={store_id}, admin_id={admin_id})")
+    
+    # Step 3: Create product
+    print(f"\n{YELLOW}Step 3: Create product{RESET}")
+    product_data = {"store_id": store_id, "name": "Widget", "price": 100, "category": "Outros"}
+    product_resp = api_call("POST", "/products", master_token, product_data)
+    if not product_resp.get("success"):
+        result.add_fail("Create product", f"Status {product_resp.get('status_code')}, {product_resp.get('error', '')}")
+        result.summary()
+        return 1
+    
+    product_id = product_resp["data"]["id"]
+    result.add_pass(f"Create product (id={product_id}, name=Widget, price=100)")
+    
+    # Step 4: Invite a client
+    print(f"\n{YELLOW}Step 4: Invite client{RESET}")
+    client_email = "editreg_cli@test.com"
+    invite_data = {"store_id": store_id, "client_email": client_email}
+    invite_resp = api_call("POST", "/invites", master_token, invite_data)
+    if not invite_resp.get("success"):
+        result.add_fail("Create invite", f"Status {invite_resp.get('status_code')}, {invite_resp.get('error', '')}")
+        result.summary()
+        return 1
+    
+    invite_token = invite_resp["data"]["token"]
+    result.add_pass(f"Create invite (token={invite_token[:16]}...)")
+    
+    # Step 5: Cliente dev-login and accept invite
+    print(f"\n{YELLOW}Step 5: Cliente login and accept invite{RESET}")
+    cliente_login = dev_login(client_email, "cliente", "Edit Reg Cliente")
+    if "error" in cliente_login:
+        result.add_fail("Cliente login", cliente_login["error"])
+        result.summary()
+        return 1
+    
+    cliente_token = cliente_login["token"]
+    result.add_pass(f"Cliente login (email={client_email})")
+    
+    # Accept invite
+    accept_resp = api_call("POST", f"/invite/{invite_token}/accept", cliente_token)
+    if not accept_resp.get("success"):
+        result.add_fail("Accept invite", f"Status {accept_resp.get('status_code')}, {accept_resp.get('error', '')}")
+        result.summary()
+        return 1
+    result.add_pass("Accept invite")
+    
+    # Step 6: Add product to catalog
+    print(f"\n{YELLOW}Step 6: Add product to catalog{RESET}")
+    catalog_data = {"store_id": store_id, "product_id": product_id, "qty": 3}
+    catalog_resp = api_call("POST", "/catalog", cliente_token, catalog_data)
+    if not catalog_resp.get("success"):
+        result.add_fail("Add to catalog", f"Status {catalog_resp.get('status_code')}, {catalog_resp.get('error', '')}")
+        result.summary()
+        return 1
+    result.add_pass("Add product to catalog (qty=3)")
+    
+    # Step 7: Send catalog to create order
+    print(f"\n{YELLOW}Step 7: Send catalog to create order{RESET}")
+    send_data = {"item_ids": None, "customer_whatsapp": "5545999990000"}
+    send_resp = api_call("POST", "/catalog/send", cliente_token, send_data)
+    if not send_resp.get("success"):
+        result.add_fail("Send catalog", f"Status {send_resp.get('status_code')}, {send_resp.get('error', '')}")
+        result.summary()
+        return 1
+    
+    orders = send_resp["data"].get("orders", [])
+    if not orders:
+        result.add_fail("Send catalog", "No orders created")
+        result.summary()
+        return 1
+    
+    order_id = orders[0]["order_id"]
+    original_total = orders[0]["total"]
+    result.add_pass(f"Create order (id={order_id}, total={original_total})")
+    
+    # Get the full order to get the token
+    get_order_resp = api_call("GET", f"/orders/{order_id}", cliente_token)
+    if not get_order_resp.get("success"):
+        result.add_fail("Get order details", f"Status {get_order_resp.get('status_code')}")
+        result.summary()
+        return 1
+    order_token = get_order_resp["data"]["token"]
+    
+    # Step 8: EDIT ORDER AS MASTER
+    print(f"\n{YELLOW}Step 8: Edit order as master{RESET}")
+    edit_data = {
+        "items": [
+            {"product_id": product_id, "name": "Widget", "price": 80, "qty": 2}
+        ]
+    }
+    edit_resp = api_call("PUT", f"/orders/{order_id}", master_token, edit_data)
+    if not edit_resp.get("success"):
+        result.add_fail("Edit order as master", f"Status {edit_resp.get('status_code')}, {edit_resp.get('error', '')}")
+        result.summary()
+        return 1
+    
+    edited_order = edit_resp["data"]
+    edited_total = edited_order.get("total")
+    if edited_total != 160:
+        result.add_fail("Edit order total", f"Expected 160, got {edited_total}")
+    else:
+        result.add_pass(f"Edit order as master (new total={edited_total}, expected=160)")
+    
+    # Step 9: GET notifications for the order (as cliente)
+    print(f"\n{YELLOW}Step 9: Get order notifications{RESET}")
+    notif_resp = api_call("GET", f"/orders/{order_id}/notifications", cliente_token)
+    if not notif_resp.get("success"):
+        result.add_fail("Get notifications", f"Status {notif_resp.get('status_code')}, {notif_resp.get('error', '')}")
+        result.summary()
+        return 1
+    
+    notifications = notif_resp["data"]
+    if not isinstance(notifications, list):
+        result.add_fail("Get notifications", f"Expected list, got {type(notifications)}")
+        result.summary()
+        return 1
+    
+    # Check for cliente notification (edited)
+    cliente_notifs = [n for n in notifications if n.get("target") == "cliente"]
+    if not cliente_notifs:
+        result.add_fail("Cliente notification", "No cliente notifications found")
+    else:
+        # Check if any notification is for edit (body contains "ajustado" or "ajustou")
+        edit_notifs = [n for n in cliente_notifs if "ajust" in n.get("body", "").lower()]
+        if not edit_notifs:
+            result.add_fail("Edit notification", f"No edit notification found. Found {len(cliente_notifs)} cliente notifications")
+        else:
+            notif = edit_notifs[0]
+            channel = notif.get("channel")
+            result.add_pass(f"Cliente edit notification recorded (channel={channel}, target=cliente)")
+    
+    # Step 10: PERMISSION TEST - other cliente cannot edit
+    print(f"\n{YELLOW}Step 10: Permission test - other cliente cannot edit{RESET}")
+    other_cliente_login = dev_login("other_cli@test.com", "cliente", "Other Cliente")
+    if "error" in other_cliente_login:
+        result.add_fail("Other cliente login", other_cliente_login["error"])
+    else:
+        other_cliente_token = other_cliente_login["token"]
+        result.add_pass("Other cliente login")
+        
+        # Try to edit order as other cliente
+        forbidden_resp = api_call("PUT", f"/orders/{order_id}", other_cliente_token, edit_data, expected_status=403)
+        if forbidden_resp.get("status_code") == 403:
+            result.add_pass("Other cliente cannot edit order (403)")
+        else:
+            result.add_fail("Permission check", f"Expected 403, got {forbidden_resp.get('status_code')}")
+    
+    # Step 11: STATUS TEST - change status to "pronto" (not editable)
+    print(f"\n{YELLOW}Step 11: Status test - change to 'pronto'{RESET}")
+    status_data = {"status": "pronto"}
+    status_resp = api_call("PUT", f"/orders/{order_id}/status", master_token, status_data)
+    if not status_resp.get("success"):
+        result.add_fail("Change status to pronto", f"Status {status_resp.get('status_code')}, {status_resp.get('error', '')}")
+    else:
+        updated_order = status_resp["data"]
+        if updated_order.get("status") != "pronto":
+            result.add_fail("Status update", f"Expected 'pronto', got {updated_order.get('status')}")
+        elif updated_order.get("editable") != False:
+            result.add_fail("Editable flag", f"Expected False, got {updated_order.get('editable')}")
+        else:
+            result.add_pass(f"Status changed to 'pronto', editable={updated_order.get('editable')}")
+    
+    # Step 12: GET order as master
+    print(f"\n{YELLOW}Step 12: GET order as master{RESET}")
+    get_master_resp = api_call("GET", f"/orders/{order_id}", master_token)
+    if get_master_resp.get("status_code") == 200:
+        result.add_pass("Master can view order (200)")
+    else:
+        result.add_fail("Master view order", f"Expected 200, got {get_master_resp.get('status_code')}")
+    
+    # Step 13: GET order as owner cliente
+    print(f"\n{YELLOW}Step 13: GET order as owner cliente{RESET}")
+    get_cliente_resp = api_call("GET", f"/orders/{order_id}", cliente_token)
+    if get_cliente_resp.get("status_code") == 200:
+        result.add_pass("Owner cliente can view order (200)")
+    else:
+        result.add_fail("Cliente view order", f"Expected 200, got {get_cliente_resp.get('status_code')}")
+    
+    # Summary
+    success = result.summary()
+    return 0 if success else 1
+
 if __name__ == "__main__":
-    sys.exit(main())
+    # Check if we should run the regression test
+    if len(sys.argv) > 1 and sys.argv[1] == "order-edit-regression":
+        sys.exit(test_order_editing_regression())
+    else:
+        sys.exit(main())

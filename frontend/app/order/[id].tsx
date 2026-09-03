@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  TextInput,
   Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
@@ -59,7 +60,7 @@ export default function OrderDetail() {
   if (state === "error") return <ErrorState onRetry={load} />;
 
   const isVendor = user?.role === "lojista" && user?.store_id === order.store_id;
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "master";
   const isOwner = user?.user_id === order.customer_user_id;
   const canEdit = isVendor || isAdmin || (isOwner && order.editable);
 
@@ -72,6 +73,13 @@ export default function OrderDetail() {
         .filter((i) => i.qty > 0)
     );
   };
+
+  const changePrice = (pid: string, value: string) => {
+    const num = parseFloat(value.replace(",", ".").replace(/[^0-9.]/g, "")) || 0;
+    setItems((prev) => prev.map((i) => (i.product_id === pid ? { ...i, price: num } : i)));
+  };
+
+  const canPrice = isVendor || isAdmin;
 
   const save = async () => {
     setSaving(true);
@@ -141,7 +149,20 @@ export default function OrderDetail() {
             >
               <View style={{ flex: 1 }}>
                 <Text style={styles.itemName}>{it.name}</Text>
-                <Text style={styles.itemPrice}>{money(it.price)}</Text>
+                {canPrice ? (
+                  <View style={styles.priceEditRow}>
+                    <Text style={styles.priceCurrency}>R$</Text>
+                    <TextInput
+                      testID={`order-price-${it.product_id}`}
+                      value={String(it.price)}
+                      onChangeText={(v) => changePrice(it.product_id, v)}
+                      keyboardType="decimal-pad"
+                      style={styles.priceInput}
+                    />
+                  </View>
+                ) : (
+                  <Text style={styles.itemPrice}>{money(it.price)}</Text>
+                )}
               </View>
               {canEdit ? (
                 <View style={styles.qtyRow}>
@@ -266,6 +287,19 @@ const styles = StyleSheet.create({
   itemBorder: { borderTopWidth: 1, borderTopColor: colors.divider },
   itemName: { fontSize: font.base, fontWeight: "600", color: colors.onSurface },
   itemPrice: { fontSize: font.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  priceEditRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  priceCurrency: { fontSize: font.sm, color: colors.onSurfaceTertiary, fontWeight: "700" },
+  priceInput: {
+    minWidth: 70,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    fontSize: font.base,
+    color: colors.onSurface,
+    backgroundColor: colors.surface,
+  },
   qtyRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   qtyBtn: {
     width: 30,

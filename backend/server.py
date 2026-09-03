@@ -823,7 +823,7 @@ async def get_order(order_id: str, token: Optional[str] = Query(None),
         sess = await db.user_sessions.find_one({"session_token": authorization.split(" ", 1)[1].strip()}, {"_id": 0})
         if sess:
             u = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
-            if u and (u["role"] == "admin" or u["user_id"] == o["customer_user_id"]
+            if u and (u["role"] in ("admin", "master") or u["user_id"] == o["customer_user_id"]
                       or (u["role"] == "lojista" and u.get("store_id") == o["store_id"])):
                 return o
     raise HTTPException(status_code=403, detail="Acesso negado")
@@ -858,14 +858,21 @@ async def update_order_items(order_id: str, body: OrderItemsUpdate, user=Depends
     if not o:
         raise HTTPException(status_code=404, detail="Pedido não encontrado")
     is_vendor = user["role"] == "lojista" and user.get("store_id") == o["store_id"]
-    is_admin = user["role"] == "admin"
+    is_admin = user["role"] in ("admin", "master")
     is_owner = user["user_id"] == o["customer_user_id"]
     if not (is_admin or is_vendor or (is_owner and o.get("editable"))):
         raise HTTPException(status_code=403, detail="Edição não permitida")
     total = round(sum(i.price * i.qty for i in body.items), 2)
     await db.orders.update_one({"id": order_id},
                                {"$set": {"items": [i.dict() for i in body.items], "total": total}})
-    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    # se o lojista/admin ajustou o pedido, avisa o cliente
+    if (is_vendor or is_admin) and not is_owner:
+        try:
+            await notify_order(updated, "edited")
+        except Exception as e:
+            logger.warning(f"notify_order edited failed: {e}")
+    return updated
 
 
 @api.put("/orders/{order_id}/status")
@@ -2426,6 +2433,8 @@ async def notify_order(o, kind):
     link_txt = f"\nLink do pedido (PDF): {link}" if link else ""
     if kind == "created":
         head = f"🆕 Novo pedido — {o['store_name']}"
+    elif kind == "edited":
+        head = f"✏️ Pedido ajustado pelo lojista — {o['store_name']}"
     else:
         head = f"🔔 Pedido atualizado ({o.get('status','')}) — {o['store_name']}"
     base_body = (f"{head}\nCliente: {o.get('customer_name','')}\n{_order_lines(o)}\n"
@@ -2441,6 +2450,10 @@ async def notify_order(o, kind):
         cust_body = (f"✅ Pedido confirmado em {o['store_name']}!\n{_order_lines(o)}\n"
                      f"Total: R$ {o['total']:.2f}{link_txt}\nObrigado pela compra!")
         subj = "Seu pedido foi confirmado — Lojas da Fronteira"
+    elif kind == "edited":
+        cust_body = (f"✏️ O lojista ajustou seu pedido em {o['store_name']}.\n{_order_lines(o)}\n"
+                     f"Novo total: R$ {o['total']:.2f}{link_txt}")
+        subj = f"Seu pedido foi ajustado — {o['store_name']}"
     else:
         cust_body = (f"🔔 Seu pedido em {o['store_name']} agora está: {o.get('status','')}.{link_txt}")
         subj = f"Atualização do seu pedido ({o.get('status','')}) — Lojas da Fronteira"

@@ -179,11 +179,25 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "PASSED: All master-only tests passed. (1) GET /master/overview returns 200 with users, stores, counts ✓ (2) POST /master/users creates vendor successfully ✓ (3) Master can change user roles via PUT /admin/users/{id}/role ✓ (4) Master can delete non-master users ✓ (5) Master cannot delete own account (400) ✓ (6) Admin cannot change roles (403) ✓. Master-only user management working correctly."
+  - task: "Order editing + client notification"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "testing"
+        -comment: "Regression test requested for order editing and client notifications. Testing PUT /api/orders/{order_id}, GET /api/orders/{order_id}/notifications, PUT /api/orders/{order_id}/status, permission checks, and notification recording."
+        -working: true
+        -agent: "testing"
+        -comment: "PASSED: All 15 tests passed (100% success rate). Comprehensive regression testing performed: (1) Master creates store and product ✓ (2) Invite creation and acceptance ✓ (3) Cliente adds product to catalog ✓ (4) Order creation via catalog send ✓ (5) Master edits order (items, price, qty) - total correctly updated to 160 ✓ (6) Client notification recorded (channel=whatsapp, target=cliente) ✓ (7) Permission check: other cliente cannot edit order (403) ✓ (8) Status change to 'pronto' sets editable=false ✓ (9) Master can view order (200) ✓ (10) Owner cliente can view order (200) ✓. Order editing, notification recording, permission checks, and status management all working correctly."
 
 metadata:
   created_by: "main_agent"
-  version: "1.3"
-  test_sequence: 3
+  version: "1.4"
+  test_sequence: 4
   run_ui: false
 
   - task: "Frontend: i18n (PT/EN/ES) + invite accept + personal catalog + multi-vendor send + invite mgmt"
@@ -220,7 +234,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Frontend: i18n (PT/EN/ES) + invite accept + personal catalog + multi-vendor send + invite mgmt"
+    - "Order editing + client notification"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -234,5 +248,7 @@ agent_communication:
     -message: "Backend testing COMPLETE - ALL 24 tests PASSED (100% success rate). Comprehensive testing performed: (1) Master auto-promotion: 3/3 passed ✓ (2) Master capabilities: 5/5 passed ✓ (3) Admin restrictions: 4/4 passed ✓ (4) Store ownership & scoping: 7/7 passed ✓ (5) Product scoping: 1/1 passed ✓ (6) Public endpoints: 3/3 passed ✓. All role-based permissions working correctly. No issues found. Backend is production-ready."
     -agent: "testing"
     -message: "NEW FEATURES testing COMPLETE - ALL 31 tests PASSED (100% success rate). Tested invite-only access, personal catalog, multi-vendor cart, and AI translation. CRITICAL BUG FIXED: optional_user datetime comparison causing 500 errors. All features working correctly. Backend is production-ready."
+    -agent: "testing"
+    -message: "ORDER EDITING REGRESSION TEST COMPLETE - ALL 15 tests PASSED (100% success rate). Comprehensive regression testing performed for order editing and client notifications: (1) Master creates store and product ✓ (2) Invite creation and acceptance ✓ (3) Cliente adds product to catalog ✓ (4) Order creation via catalog send ✓ (5) Master edits order (items, price, qty) - total correctly updated to 160 ✓ (6) Client notification recorded (channel=whatsapp, target=cliente) with 'ajustado' message ✓ (7) Permission check: other cliente cannot edit order (403) ✓ (8) Status change to 'pronto' sets editable=false ✓ (9) Master can view order (200) ✓ (10) Owner cliente can view order (200) ✓. All order editing features, notification recording, permission checks, and status management working correctly. No issues found."
     -agent: "testing"
     -message: "FRONTEND UI TESTING COMPLETE - CRITICAL BUG FOUND: Master auto-promotion NOT working in frontend. When logging in with lucasmedicina86@gmail.com as admin role, the UI shows 'Minhas lojas' (admin view) instead of 'Todas as lojas' (master view). No master-add-user button, no master role chips visible, no 'Painel master · gestão completa' subtitle. Backend correctly returns role=master, but frontend is not rendering master-specific UI. CLIENTE flow WORKS PERFECTLY: ✓ Customer home with language selector (PT/EN/ES), search bar ✓ Invite acceptance (/invite/d303b9bea81c428b971fd3113a75b834) ✓ Store page with products ✓ Add products to catalog ✓ Personal catalog with store badges, qty controls, PDF/Send buttons ✓ Language switching (Send button changes to 'Send' in English, 'Enviar' in Spanish) ✓ Catalog send creates order successfully ✓ Order appears in Pedidos tab. LOJISTA flow WORKS: ✓ Shows 'Nenhuma loja vinculada' correctly when no store assigned. The master UI rendering is the only critical issue."
