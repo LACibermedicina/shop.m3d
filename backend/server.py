@@ -4,6 +4,7 @@ import io
 import json
 import uuid
 import base64
+import random
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -1896,6 +1897,24 @@ class CampaignReq(BaseModel):
     tone: Optional[str] = None
 
 
+class AssetTextUpdate(BaseModel):
+    network: str
+    caption: Optional[str] = ""
+    hashtags: Optional[List[str]] = []
+    cta: Optional[str] = ""
+
+
+class AssetRegenReq(BaseModel):
+    network: str
+    distinct: Optional[bool] = False
+    prompt: Optional[str] = None
+
+
+class SuggestReq(BaseModel):
+    network: str
+    language: Optional[str] = "pt"
+
+
 def _mkt_parse_json(text: str) -> dict:
     t = (text or "").strip()
     if t.startswith("```"):
@@ -2053,7 +2072,7 @@ async def marketing_create_campaign(body: CampaignReq, user=Depends(require_role
         hh = handles.get(nk) or {}
         assets.append({
             "network": nk, "label": cfg["label"], "icon": cfg["icon"], "ratio": cfg["ratio"],
-            "w": cfg["w"], "h": cfg["h"], "image_path": path,
+            "w": cfg["w"], "h": cfg["h"], "image_path": path, "image_prompt": image_prompt,
             "caption": nc.get("caption", ""), "hashtags": nc.get("hashtags") or [], "cta": nc.get("cta", ""),
             "profile_url": (hh.get("url") or hh.get("handle") or ""),
         })
@@ -2062,7 +2081,8 @@ async def marketing_create_campaign(body: CampaignReq, user=Depends(require_role
 
     doc = {"id": new_id("camp"), "owner_id": user["user_id"], "store_id": user.get("store_id"),
            "product_name": product["name"], "concept": data.get("concept_pt", ""),
-           "image_prompt": image_prompt, "cover_path": assets[0]["image_path"],
+           "image_prompt": image_prompt, "ref_image_path": product.get("image", ""),
+           "cover_path": assets[0]["image_path"],
            "assets": assets, "created_at": now_iso()}
     await db.campaigns.insert_one(doc)
     doc.pop("_id", None)
@@ -2090,6 +2110,112 @@ async def marketing_delete_campaign(cid: str, user=Depends(require_role("lojista
         raise HTTPException(status_code=404, detail="Campanha não encontrada")
     await db.campaigns.delete_one({"id": cid})
     return {"ok": True}
+
+
+_VARIATION_HINTS = [
+    "an alternative creative concept with a completely different scene and setting",
+    "a different camera angle with a fresh background and mood",
+    "a new art direction with a different color palette and composition",
+    "a different time of day and lighting for a distinct atmosphere",
+    "a unique lifestyle context with different props and environment",
+    "a bold minimalist studio composition with dramatic lighting",
+]
+
+
+async def _mkt_find_campaign_asset(cid: str, network: str, user):
+    c = await db.campaigns.find_one({"id": cid})
+    if not c or (not is_master(user) and c.get("owner_id") != user["user_id"]):
+        raise HTTPException(status_code=404, detail="Campanha não encontrada")
+    if network not in SUPPORTED_NETWORKS:
+        raise HTTPException(status_code=400, detail="Rede inválida")
+    assets = c.get("assets") or []
+    asset = next((a for a in assets if a.get("network") == network), None)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Formato não encontrado nesta campanha")
+    return c, assets, asset
+
+
+@api.put("/marketing/campaigns/{cid}/asset")
+async def marketing_update_asset(cid: str, body: AssetTextUpdate,
+                                 user=Depends(require_role("lojista", "admin"))):
+    _c, assets, asset = await _mkt_find_campaign_asset(cid, body.network, user)
+    asset["caption"] = (body.caption or "").strip()
+    asset["hashtags"] = [h.strip() for h in (body.hashtags or []) if h and h.strip()]
+    asset["cta"] = (body.cta or "").strip()
+    await db.campaigns.update_one({"id": cid}, {"$set": {"assets": assets}})
+    return asset
+
+
+@api.post("/marketing/campaigns/{cid}/asset/regenerate")
+async def marketing_regen_asset(cid: str, body: AssetRegenReq,
+                                user=Depends(require_role("lojista", "admin"))):
+    c, assets, asset = await _mkt_find_campaign_asset(cid, body.network, user)
+    cfg = SUPPORTED_NETWORKS[body.network]
+    base_prompt = (body.prompt or "").strip() or asset.get("image_prompt") or c.get("image_prompt") or (
+        f"High-end commercial lifestyle photograph of {c.get('product_name','')} in an aspirational setting")
+    prompt = base_prompt
+    if body.distinct:
+        prompt = f"{base_prompt}. Reimagine it as {random.choice(_VARIATION_HINTS)}, keeping the same product."
+
+    ref = None
+    rp = c.get("ref_image_path")
+    if rp:
+        try:
+            ref, _ = await run_in_threadpool(get_object, rp)
+        except Exception:
+            ref = None
+    try:
+        img = await _mkt_generate_image(prompt, ref)
+    except Exception as e:
+        logger.warning(f"marketing regen image failed: {e}")
+        raise HTTPException(status_code=502, detail="Não foi possível gerar a imagem. Tente novamente.")
+    if not img:
+        raise HTTPException(status_code=502, detail="Não foi possível gerar a imagem. Tente novamente.")
+
+    variant = await run_in_threadpool(_cover_crop_bytes, img, cfg["w"], cfg["h"])
+    path = f"{APP_NAME}/campaigns/{user['user_id']}/{uuid.uuid4().hex}.jpg"
+    await run_in_threadpool(put_object, path, variant, "image/jpeg")
+
+    old_path = asset.get("image_path")
+    asset["image_path"] = path
+    if (body.prompt or "").strip():
+        asset["image_prompt"] = body.prompt.strip()
+    upd = {"assets": assets}
+    if c.get("cover_path") == old_path:
+        upd["cover_path"] = path
+    await db.campaigns.update_one({"id": cid}, {"$set": upd})
+    return asset
+
+
+@api.post("/marketing/campaigns/{cid}/suggest")
+async def marketing_suggest_copy(cid: str, body: SuggestReq,
+                                 user=Depends(require_role("lojista", "admin"))):
+    c, _assets, _asset = await _mkt_find_campaign_asset(cid, body.network, user)
+    cfg = SUPPORTED_NETWORKS[body.network]
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    lang_name = {"pt": "português do Brasil", "en": "inglês", "es": "espanhol"}.get(body.language or "pt", "português do Brasil")
+    system = (
+        "Você é copywriter sênior de marketing digital. Crie a MELHOR legenda possível "
+        f"para {cfg['label']} usando metodologia AIDA e gatilhos mentais, no idioma {lang_name}. "
+        "Responda ESTRITAMENTE com JSON válido, sem markdown."
+    )
+    schema = {"caption": "legenda persuasiva e adequada à rede", "hashtags": ["#exemplo"], "cta": "chamada para ação"}
+    prompt = (
+        f"Produto/campanha: {c.get('product_name','')}\n"
+        f"Conceito criativo: {c.get('concept','')}\n"
+        f"Rede-alvo: {cfg['label']} (formato {cfg['ratio']})\n\n"
+        "Sugira a melhor legenda para maximizar engajamento e conversão, com 4 a 8 hashtags e um CTA claro.\n"
+        f"Preencha exatamente estas chaves: {json.dumps(schema, ensure_ascii=False)}"
+    )
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"mktsug-{uuid.uuid4().hex[:8]}",
+                   system_message=system).with_model("gemini", "gemini-3-flash-preview")
+    try:
+        resp = await chat.send_message(UserMessage(text=prompt))
+        data = _mkt_parse_json(resp)
+    except Exception as e:
+        logger.warning(f"marketing suggest failed: {e}")
+        raise HTTPException(status_code=502, detail="Falha ao gerar sugestão. Tente novamente.")
+    return {"caption": data.get("caption", ""), "hashtags": data.get("hashtags") or [], "cta": data.get("cta", "")}
 
 
 @api.get("/webhooks/whatsapp")

@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   RefreshControl,
   Linking,
+  ActivityIndicator,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -40,6 +41,178 @@ const LANGS = [
   { key: "en", label: "EN" },
   { key: "es", label: "ES" },
 ];
+
+type AssetEditorProps = {
+  campaignId: string;
+  asset: Asset;
+  language: string;
+  onUpdated: (a: Asset) => void;
+  onCopy: (txt: string, label?: string) => void;
+  onShare: (a: Asset) => void;
+  onOpenProfile: (a: Asset) => void;
+};
+
+function AssetEditor({ campaignId, asset, language, onUpdated, onCopy, onShare, onOpenProfile }: AssetEditorProps) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [caption, setCaption] = useState(asset.caption || "");
+  const [hashtags, setHashtags] = useState((asset.hashtags || []).join(" "));
+  const [cta, setCta] = useState(asset.cta || "");
+  const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [regen, setRegen] = useState<"" | "same" | "distinct">("");
+
+  const parseTags = (s: string) =>
+    s.split(/[\s,]+/).map((t) => t.trim()).filter(Boolean).map((t) => (t.startsWith("#") ? t : `#${t}`));
+
+  const startEdit = () => {
+    setCaption(asset.caption || "");
+    setHashtags((asset.hashtags || []).join(" "));
+    setCta(asset.cta || "");
+    setEditing(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const updated = await api.updateCampaignAsset(campaignId, asset.network, caption.trim(), parseTags(hashtags), cta.trim());
+      onUpdated(updated);
+      setEditing(false);
+      toast("Textos salvos", "success");
+    } catch (e: any) {
+      toast(e.message || "Falha ao salvar", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const suggest = async () => {
+    setSuggesting(true);
+    try {
+      const s = await api.suggestCampaignCopy(campaignId, asset.network, language);
+      setCaption(s.caption || "");
+      setHashtags((s.hashtags || []).join(" "));
+      setCta(s.cta || "");
+      setEditing(true);
+      toast("Sugestão da IA aplicada — revise e salve", "success");
+    } catch (e: any) {
+      toast(e.message || "Falha ao sugerir", "error");
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const regenerate = async (distinct: boolean) => {
+    setRegen(distinct ? "distinct" : "same");
+    try {
+      const updated = await api.regenerateCampaignAsset(campaignId, asset.network, distinct);
+      onUpdated(updated);
+      toast(distinct ? "Variação distinta gerada!" : "Imagem regerada!", "success");
+    } catch (e: any) {
+      toast(e.message || "Falha ao gerar imagem", "error");
+    } finally {
+      setRegen("");
+    }
+  };
+
+  const busyImg = regen !== "";
+
+  return (
+    <View style={styles.assetCard}>
+      <View style={styles.assetHead}>
+        <Ionicons name={asset.icon as any} size={18} color={colors.brandPrimary} />
+        <Text style={styles.assetLabel}>{asset.label}</Text>
+        <View style={styles.ratioBadge}>
+          <Text style={styles.ratioText}>{asset.ratio}</Text>
+        </View>
+      </View>
+
+      <View style={styles.imgWrap}>
+        <Image
+          source={{ uri: fileUrl(asset.image_path) || "" }}
+          style={[styles.assetImg, { aspectRatio: asset.w / asset.h }]}
+          contentFit="cover"
+          transition={200}
+        />
+        {busyImg && (
+          <View style={styles.imgOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.overlayText}>
+              {regen === "distinct" ? "Criando variação distinta..." : "Regerando imagem..."}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Regerar imagem / variação distinta */}
+      <View style={styles.toolbar}>
+        <Pressable testID={`regen-same-${asset.network}`} disabled={busyImg} style={styles.toolBtn} onPress={() => regenerate(false)}>
+          <Ionicons name="refresh" size={15} color={colors.brandPrimary} />
+          <Text style={styles.toolText}>Regerar</Text>
+        </Pressable>
+        <Pressable testID={`regen-distinct-${asset.network}`} disabled={busyImg} style={styles.toolBtn} onPress={() => regenerate(true)}>
+          <Ionicons name="color-wand" size={15} color={colors.brandPrimary} />
+          <Text style={styles.toolText}>Variação distinta</Text>
+        </Pressable>
+      </View>
+
+      {editing ? (
+        <View style={styles.editBox}>
+          <Field testID={`edit-caption-${asset.network}`} label="Legenda" value={caption} onChangeText={setCaption} placeholder="Escreva a legenda..." multiline />
+          <Field testID={`edit-hashtags-${asset.network}`} label="Hashtags" value={hashtags} onChangeText={setHashtags} placeholder="#exemplo #promo" autoCapitalize="none" />
+          <Field testID={`edit-cta-${asset.network}`} label="Chamada para ação (CTA)" value={cta} onChangeText={setCta} placeholder="Compre agora" />
+          <View style={styles.editActions}>
+            <Pressable testID={`cancel-edit-${asset.network}`} style={styles.actBtn} onPress={() => setEditing(false)}>
+              <Ionicons name="close" size={16} color={colors.onSurface} />
+              <Text style={styles.actText}>Cancelar</Text>
+            </Pressable>
+            <Pressable testID={`suggest-${asset.network}`} style={styles.actBtn} disabled={suggesting} onPress={suggest}>
+              {suggesting ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="sparkles" size={16} color={colors.brandPrimary} />}
+              <Text style={styles.actText}>Sugerir IA</Text>
+            </Pressable>
+            <Pressable testID={`save-asset-${asset.network}`} style={[styles.actBtn, styles.actPrimary]} disabled={saving} onPress={save}>
+              {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="save" size={16} color="#fff" />}
+              <Text style={[styles.actText, { color: "#fff" }]}>Salvar</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <>
+          {!!asset.caption && (
+            <Pressable onPress={() => onCopy(asset.caption, "Legenda copiada")}>
+              <Text style={styles.caption}>{asset.caption}</Text>
+            </Pressable>
+          )}
+          {!!(asset.hashtags && asset.hashtags.length) && (
+            <Pressable onPress={() => onCopy(asset.hashtags.join(" "), "Hashtags copiadas")}>
+              <Text style={styles.hashtags}>{asset.hashtags.join("  ")}</Text>
+            </Pressable>
+          )}
+          {!!asset.cta && (
+            <View style={styles.ctaBox}>
+              <Ionicons name="megaphone-outline" size={14} color={colors.brandSecondary} />
+              <Text style={styles.ctaText}>{asset.cta}</Text>
+            </View>
+          )}
+          <View style={styles.assetActions}>
+            <Pressable testID={`edit-asset-${asset.network}`} style={styles.actBtn} onPress={startEdit}>
+              <Ionicons name="create-outline" size={16} color={colors.onSurface} />
+              <Text style={styles.actText}>Editar</Text>
+            </Pressable>
+            <Pressable style={[styles.actBtn, styles.actPrimary]} onPress={() => onShare(asset)}>
+              <Ionicons name="download-outline" size={16} color="#fff" />
+              <Text style={[styles.actText, { color: "#fff" }]}>Salvar/Publicar</Text>
+            </Pressable>
+            <Pressable style={styles.actBtn} onPress={() => onOpenProfile(asset)}>
+              <Ionicons name="open-outline" size={16} color={colors.onSurface} />
+              <Text style={styles.actText}>Abrir</Text>
+            </Pressable>
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
 
 export default function MarketingStudio({ showBack = false }: { showBack?: boolean }) {
   const insets = useSafeAreaInsets();
@@ -189,6 +362,15 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
     }
   };
 
+  const updateDetailAsset = useCallback((updated: Asset) => {
+    setDetail((prev) => {
+      if (!prev) return prev;
+      const assets = (prev.assets || []).map((x) => (x.network === updated.network ? updated : x));
+      const cover = prev.assets && prev.assets[0]?.network === updated.network ? updated.image_path : prev.cover_path;
+      return { ...prev, assets, cover_path: cover };
+    });
+  }, []);
+
   const copyText = async (txt: string, label = "Copiado") => {
     try {
       await Clipboard.setStringAsync(txt);
@@ -292,47 +474,16 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
             </View>
           )}
           {(detail.assets || []).map((a) => (
-            <View key={a.network} style={styles.assetCard}>
-              <View style={styles.assetHead}>
-                <Ionicons name={a.icon as any} size={18} color={colors.brandPrimary} />
-                <Text style={styles.assetLabel}>{a.label}</Text>
-                <View style={styles.ratioBadge}>
-                  <Text style={styles.ratioText}>{a.ratio}</Text>
-                </View>
-              </View>
-              <Image source={{ uri: fileUrl(a.image_path) || "" }}
-                style={[styles.assetImg, { aspectRatio: a.w / a.h }]} contentFit="cover" transition={200} />
-              {!!a.caption && (
-                <Pressable onPress={() => copyText(a.caption, "Legenda copiada")}>
-                  <Text style={styles.caption}>{a.caption}</Text>
-                </Pressable>
-              )}
-              {!!(a.hashtags && a.hashtags.length) && (
-                <Pressable onPress={() => copyText(a.hashtags.join(" "), "Hashtags copiadas")}>
-                  <Text style={styles.hashtags}>{a.hashtags.join("  ")}</Text>
-                </Pressable>
-              )}
-              {!!a.cta && (
-                <View style={styles.ctaBox}>
-                  <Ionicons name="megaphone-outline" size={14} color={colors.brandSecondary} />
-                  <Text style={styles.ctaText}>{a.cta}</Text>
-                </View>
-              )}
-              <View style={styles.assetActions}>
-                <Pressable style={styles.actBtn} onPress={() => copyText(`${a.caption}\n\n${a.hashtags.join(" ")}`, "Texto copiado")}>
-                  <Ionicons name="copy-outline" size={16} color={colors.onSurface} />
-                  <Text style={styles.actText}>Copiar</Text>
-                </Pressable>
-                <Pressable style={[styles.actBtn, styles.actPrimary]} onPress={() => shareAsset(a)}>
-                  <Ionicons name="share-social" size={16} color="#fff" />
-                  <Text style={[styles.actText, { color: "#fff" }]}>Publicar</Text>
-                </Pressable>
-                <Pressable style={styles.actBtn} onPress={() => openProfile(a)}>
-                  <Ionicons name="open-outline" size={16} color={colors.onSurface} />
-                  <Text style={styles.actText}>Abrir</Text>
-                </Pressable>
-              </View>
-            </View>
+            <AssetEditor
+              key={a.network}
+              campaignId={detail.id}
+              asset={a}
+              language={language}
+              onUpdated={updateDetailAsset}
+              onCopy={copyText}
+              onShare={shareAsset}
+              onOpenProfile={openProfile}
+            />
           ))}
         </ScrollView>
       </View>
@@ -591,6 +742,25 @@ const styles = StyleSheet.create({
   ratioBadge: { backgroundColor: colors.surfaceTertiary, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.sm },
   ratioText: { fontSize: font.sm, fontWeight: "700", color: colors.onSurfaceTertiary },
   assetImg: { width: "100%", borderRadius: radius.md, backgroundColor: colors.surfaceTertiary },
+  imgWrap: { position: "relative" },
+  imgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(10,19,15,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
+  overlayText: { color: "#fff", fontSize: font.sm, fontWeight: "700" },
+  toolbar: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  toolBtn: {
+    flex: 1, flexDirection: "row", gap: 5, alignItems: "center", justifyContent: "center",
+    paddingVertical: 9, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.brandPrimary,
+    backgroundColor: colors.brandTertiary,
+  },
+  toolText: { fontSize: font.sm, fontWeight: "700", color: colors.brandPrimary },
+  editBox: { marginTop: spacing.md },
+  editActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
   caption: { fontSize: font.base, color: colors.onSurface, lineHeight: 21, marginTop: spacing.md },
   hashtags: { fontSize: font.sm, color: colors.brandPrimary, fontWeight: "600", marginTop: spacing.sm, lineHeight: 20 },
   ctaBox: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.sm },

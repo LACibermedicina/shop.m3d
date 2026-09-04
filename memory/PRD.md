@@ -104,3 +104,10 @@ Solicitado originalmente como web (Next.js/Express/Prisma/Postgres); **adaptado 
 - Configurado EMERGENT_LLM_KEY, ALLOW_DEV_LOGIN, DEV_LOGIN_SECRET, MASTER_EMAIL no backend/.env.
 - Contas semeadas: root/@0root (master), admin/@0admin, lojista/@0lojista, cliente/@0cliente.
 - Validação: testing_agent 23/23 backend PASS + frontend PASS (3 papéis).
+
+## Marketing Studio — melhorias (2026-09-04)
+- (a) Imagens distintas por rede sob demanda: botão "Variação distinta" gera nova imagem própria da rede via IA (endpoint POST /marketing/campaigns/{id}/asset/regenerate distinct=true). Botão "Regerar" refaz mesma direção.
+- (c) Editar antes de publicar: campos de Legenda/Hashtags/CTA editáveis por formato com salvar (PUT /marketing/campaigns/{id}/asset) + botão "Sugerir IA" (POST /marketing/campaigns/{id}/suggest) que propõe o melhor texto.
+- (b) Sem auto-post por API: usuário salva/compartilha a imagem no formato certo e publica de forma autônoma (botão Salvar/Publicar).
+- (d) Atalho de Marketing na home do master/admin (badge sparkles no header de (admin)/index).
+- Backend: campanhas agora guardam image_prompt por asset e ref_image_path. Validado end-to-end via curl + screenshots.

@@ -207,4 +207,10 @@ export const api = {
   campaigns: () => apiRequest("/marketing/campaigns"),
   campaign: (id: string) => apiRequest(`/marketing/campaigns/${id}`),
   deleteCampaign: (id: string) => apiRequest(`/marketing/campaigns/${id}`, { method: "DELETE" }),
+  updateCampaignAsset: (id: string, network: string, caption: string, hashtags: string[], cta: string) =>
+    apiRequest(`/marketing/campaigns/${id}/asset`, { method: "PUT", body: { network, caption, hashtags, cta } }),
+  regenerateCampaignAsset: (id: string, network: string, distinct = false, prompt?: string) =>
+    apiRequest(`/marketing/campaigns/${id}/asset/regenerate`, { method: "POST", body: { network, distinct, prompt } }),
+  suggestCampaignCopy: (id: string, network: string, language = "pt") =>
+    apiRequest(`/marketing/campaigns/${id}/suggest`, { method: "POST", body: { network, language } }),
 };
