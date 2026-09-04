@@ -210,8 +210,8 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.5"
-  test_sequence: 5
+  version: "1.6"
+  test_sequence: 6
   run_ui: false
 
   - task: "Frontend: i18n (PT/EN/ES) + invite accept + personal catalog + multi-vendor send + invite mgmt"
@@ -245,12 +245,32 @@ metadata:
         -working: true
         -agent: "testing"
         -comment: "PASSED: All 31 tests passed (100% success rate). Comprehensive end-to-end testing performed: (1) Master auto-promotion ✓ (2) Store creation with admin_id field ✓ (3) Product creation ✓ (4) Invite-only access control BEFORE invite (stores hidden, 403 on direct access) ✓ (5) Invite creation with token+link ✓ (6) Public invite view ✓ (7) Invite acceptance and access verification ✓ (8) Personal catalog (add items, access control, filtering) ✓ (9) Catalog PDF report generation ✓ (10) Multi-vendor cart send (2 orders created, catalog cleared) ✓ (11) Vendor orders visibility ✓ (12) AI translation (Spanish, English, Portuguese) ✓ (13) Negative test (no invite = no access) ✓. CRITICAL BUG FIXED: optional_user datetime comparison issue causing 500 errors on /stores and /home endpoints. All invite-only, personal catalog, multi-vendor cart, and AI translation features working correctly."
+  - task: "Marketing / Campanhas IA (socials + campaign generation with AI images)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "NEW MARKETING MODULE. Please test the marketing endpoints (auth required, roles lojista/admin/master). Login via POST /api/auth/login. Use lojista/@0lojista and cliente/@0cliente. Tests: (1) GET /api/marketing/socials with lojista -> 200 returns {networks:[], catalog:[5 items with keys instagram_feed, instagram_story, tiktok, pinterest, facebook_feed]}. (2) PUT /api/marketing/socials {networks:[{network:'instagram_feed',handle:'@minhaloja',url:'https://instagram.com/minhaloja',enabled:true}]} -> 200; GET again reflects it. (3) POST /api/marketing/campaign {product_name:'Tenis Runner X', product_details:'leve, corrida, amortecimento', price:'R$ 299', category:'Calcados', networks:['instagram_feed'], language:'pt', tone:'esportivo'} -> 200 within ~40s. Verify response has id, concept, cover_path, assets[0] with image_path, caption, hashtags (list), cta, ratio '4:5', w 1080, h 1350. IMPORTANT this calls real AI image gen (Gemini nano banana) - use ONLY 1 network to limit cost/time. (4) GET /api/files/{assets[0].image_path} -> 200 image/jpeg. (5) GET /api/marketing/campaigns -> list contains the new campaign (with cover_path, WITHOUT assets). (6) GET /api/marketing/campaigns/{id} -> full with assets. (7) DELETE /api/marketing/campaigns/{id} -> ok; then GET detail -> 404. (8) Permission: cliente token on GET /api/marketing/socials -> 403, POST /api/marketing/campaign -> 403. (9) POST campaign with neither product_id nor product_name -> 400. Report any 500s. Credentials in /app/memory/test_credentials.md."
+        -working: true
+        -agent: "testing"
+        -comment: "PASSED: All 12 tests passed (100% success rate). Comprehensive marketing endpoints testing performed: (1) GET /api/marketing/socials with lojista token returns 200 with networks array and catalog containing 5 items (instagram_feed, instagram_story, tiktok, pinterest, facebook_feed) with correct fields (key, label, icon, ratio, w, h) ✓ (2) PUT /api/marketing/socials successfully updates social networks (instagram_feed with handle @minhaloja, url, enabled=true) ✓ (3) GET /api/marketing/socials after PUT confirms changes persisted ✓ (4) POST /api/marketing/campaign with REAL AI image generation completed successfully in 19.8s, returned campaign with id, concept (non-empty), cover_path, assets array with 1 item containing image_path, caption (non-empty), hashtags (8 items), cta, ratio=4:5, w=1080, h=1350 ✓ (5) GET /api/files/{image_path} returns 200 with content-type image/jpeg and size 296.6KB (>10KB) ✓ (6) GET /api/marketing/campaigns returns list with 2 campaigns, each has cover_path but NO assets array ✓ (7) GET /api/marketing/campaigns/{id} returns full campaign WITH assets array ✓ (8) DELETE /api/marketing/campaigns/{id} returns 200 with ok=true ✓ (9) GET deleted campaign returns 404 ✓ (10) Cliente GET /api/marketing/socials returns 403 (permission check) ✓ (11) Cliente POST /api/marketing/campaign returns 403 (permission check) ✓ (12) POST campaign with empty body (no product_id, no product_name) returns 400 (validation check) ✓. AI image generation working correctly with Gemini. All marketing features working correctly. No issues found."
 
 test_plan:
   current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "NEW MARKETING MODULE. Please test the marketing endpoints (auth required, roles lojista/admin/master). Login via POST /api/auth/login. Use lojista/@0lojista and cliente/@0cliente. Tests: (1) GET /api/marketing/socials with lojista -> 200 returns {networks:[], catalog:[5 items with keys instagram_feed, instagram_story, tiktok, pinterest, facebook_feed]}. (2) PUT /api/marketing/socials {networks:[{network:'instagram_feed',handle:'@minhaloja',url:'https://instagram.com/minhaloja',enabled:true}]} -> 200; GET again reflects it. (3) POST /api/marketing/campaign {product_name:'Tenis Runner X', product_details:'leve, corrida, amortecimento', price:'R$ 299', category:'Calcados', networks:['instagram_feed'], language:'pt', tone:'esportivo'} -> 200 within ~40s. Verify response has id, concept, cover_path, assets[0] with image_path, caption, hashtags (list), cta, ratio '4:5', w 1080, h 1350. IMPORTANT this calls real AI image gen (Gemini nano banana) - use ONLY 1 network to limit cost/time. (4) GET /api/files/{assets[0].image_path} -> 200 image/jpeg. (5) GET /api/marketing/campaigns -> list contains the new campaign (with cover_path, WITHOUT assets). (6) GET /api/marketing/campaigns/{id} -> full with assets. (7) DELETE /api/marketing/campaigns/{id} -> ok; then GET detail -> 404. (8) Permission: cliente token on GET /api/marketing/socials -> 403, POST /api/marketing/campaign -> 403. (9) POST campaign with neither product_id nor product_name -> 400. Report any 500s. Credentials in /app/memory/test_credentials.md."
+    -agent: "testing"
+    -message: "MARKETING ENDPOINTS TESTING COMPLETE - ALL 12 tests PASSED (100% success rate). Comprehensive testing performed for all marketing endpoints: ✓ GET /api/marketing/socials returns correct structure with 5 social network catalog items ✓ PUT /api/marketing/socials successfully updates and persists social networks ✓ POST /api/marketing/campaign with REAL AI image generation completed in 19.8s (Gemini image generation working) ✓ Campaign response includes all required fields (id, concept, cover_path, assets with image_path, caption, hashtags, cta, correct dimensions 1080x1350, ratio 4:5) ✓ GET /api/files/{image_path} returns valid JPEG image (296.6KB) ✓ GET /api/marketing/campaigns list view excludes assets array ✓ GET /api/marketing/campaigns/{id} detail view includes assets array ✓ DELETE campaign works and returns 404 on subsequent GET ✓ Permission checks: cliente role correctly blocked (403) from both GET socials and POST campaign ✓ Validation: empty body correctly returns 400. AI image generation is working perfectly with Gemini. All marketing features are production-ready. No issues found."
 
 agent_communication:
     -agent: "main"

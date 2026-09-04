@@ -3,6 +3,7 @@ import re
 import io
 import json
 import uuid
+import base64
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -1862,6 +1863,235 @@ async def send_order_whatsapp(body: SendWhatsApp, user=Depends(get_current_user)
     return {"ok": True, "result": result}
 
 
+# ============================================================ MARKETING / CAMPANHAS IA
+# Redes sociais suportadas + formato padrão de imagem por rede
+SUPPORTED_NETWORKS = {
+    "instagram_feed": {"label": "Instagram Feed", "icon": "logo-instagram", "ratio": "4:5", "w": 1080, "h": 1350, "base": "https://instagram.com/"},
+    "instagram_story": {"label": "Instagram Stories/Reels", "icon": "logo-instagram", "ratio": "9:16", "w": 1080, "h": 1920, "base": "https://instagram.com/"},
+    "tiktok": {"label": "TikTok", "icon": "logo-tiktok", "ratio": "9:16", "w": 1080, "h": 1920, "base": "https://tiktok.com/@"},
+    "pinterest": {"label": "Pinterest", "icon": "logo-pinterest", "ratio": "2:3", "w": 1000, "h": 1500, "base": "https://pinterest.com/"},
+    "facebook_feed": {"label": "Facebook Feed", "icon": "logo-facebook", "ratio": "1:1", "w": 1080, "h": 1080, "base": "https://facebook.com/"},
+}
+
+
+class SocialNetworkIn(BaseModel):
+    network: str
+    handle: Optional[str] = ""
+    url: Optional[str] = ""
+    enabled: Optional[bool] = True
+
+
+class SocialsUpdate(BaseModel):
+    networks: List[SocialNetworkIn] = []
+
+
+class CampaignReq(BaseModel):
+    product_id: Optional[str] = None
+    product_name: Optional[str] = None
+    product_details: Optional[str] = None
+    price: Optional[str] = None
+    category: Optional[str] = None
+    networks: Optional[List[str]] = None
+    language: Optional[str] = "pt"
+    tone: Optional[str] = None
+
+
+def _mkt_parse_json(text: str) -> dict:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z]*\n?", "", t)
+        t = re.sub(r"\n?```$", "", t.strip())
+    a, b = t.find("{"), t.rfind("}")
+    if a >= 0 and b > a:
+        t = t[a:b + 1]
+    return json.loads(t)
+
+
+def _cover_crop_bytes(src_bytes: bytes, w: int, h: int) -> bytes:
+    """Resize-to-cover + center-crop to exact (w,h), return JPEG bytes."""
+    from PIL import Image
+    img = Image.open(io.BytesIO(src_bytes)).convert("RGB")
+    sw, sh = img.size
+    scale = max(w / sw, h / sh)
+    nw, nh = max(w, round(sw * scale)), max(h, round(sh * scale))
+    img = img.resize((nw, nh), Image.LANCZOS)
+    left, top = (nw - w) // 2, (nh - h) // 2
+    img = img.crop((left, top, left + w, top + h))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=88)
+    return buf.getvalue()
+
+
+async def _mkt_generate_copy(product: dict, networks: list, language: str, tone: Optional[str]) -> dict:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    lang_name = {"pt": "português do Brasil", "en": "inglês", "es": "espanhol"}.get(language, "português do Brasil")
+    net_labels = {k: SUPPORTED_NETWORKS[k]["label"] for k in networks}
+    schema = {
+        "concept_pt": "conceito criativo da campanha em 1-2 frases (sempre em português)",
+        "image_prompt_en": "prompt fotográfico DETALHADO em INGLÊS para gerador de imagem por IA: cenário lifestyle imersivo, iluminação, ângulo de câmera, textura, atmosfera, composição vertical, produto centralizado e com margens, sem qualquer texto na imagem",
+        "networks": {k: {"caption": "legenda persuasiva", "hashtags": ["#exemplo"], "cta": "chamada para ação"} for k in networks},
+    }
+    system = (
+        "Você é diretor de criação e copywriter sênior de campanhas publicitárias imersivas "
+        "para redes sociais e marketplaces. Use metodologia AIDA, gatilhos mentais e CTA claro. "
+        f"Os textos comerciais devem estar em {lang_name}. "
+        "Responda ESTRITAMENTE com um JSON válido (sem markdown, sem comentários)."
+    )
+    prompt = (
+        f"Produto: {product.get('name','')}\n"
+        f"Detalhes: {product.get('details','')}\n"
+        f"Categoria: {product.get('category','')}\n"
+        f"Preço: {product.get('price','')}\n"
+        f"Tom desejado: {tone or 'moderno, aspiracional'}\n"
+        f"Redes-alvo: {net_labels}\n\n"
+        "Para CADA rede, crie uma legenda única e adaptada ao público, com 4 a 8 hashtags e um CTA.\n"
+        f"Preencha os valores mantendo exatamente estas chaves: {json.dumps(schema, ensure_ascii=False)}"
+    )
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"mkt-{uuid.uuid4().hex[:8]}",
+                   system_message=system).with_model("gemini", "gemini-3-flash-preview")
+    resp = await chat.send_message(UserMessage(text=prompt))
+    return _mkt_parse_json(resp)
+
+
+async def _mkt_generate_image(prompt_en: str, ref_bytes: Optional[bytes] = None) -> Optional[bytes]:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"mktimg-{uuid.uuid4().hex[:8]}",
+                   system_message="You are a world-class commercial advertising photographer and art director.")
+    chat.with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+    full_prompt = (prompt_en or "").strip() + \
+        " Ultra photorealistic commercial advertising photography, 8k, sharp focus, professional color grading, vertical composition, subject centered with generous margins, no text, no watermark."
+    if ref_bytes:
+        b64 = base64.b64encode(ref_bytes).decode("utf-8")
+        msg = UserMessage(text=full_prompt + " Feature the exact product shown in the reference image.",
+                          file_contents=[ImageContent(b64)])
+    else:
+        msg = UserMessage(text=full_prompt)
+    _text, images = await chat.send_message_multimodal_response(msg)
+    if not images:
+        return None
+    return base64.b64decode(images[0]["data"])
+
+
+@api.get("/marketing/socials")
+async def marketing_get_socials(user=Depends(require_role("lojista", "admin"))):
+    catalog = [{"key": k, "label": v["label"], "icon": v["icon"], "ratio": v["ratio"],
+                "w": v["w"], "h": v["h"]} for k, v in SUPPORTED_NETWORKS.items()]
+    return {"networks": user.get("social_networks") or [], "catalog": catalog}
+
+
+@api.put("/marketing/socials")
+async def marketing_put_socials(body: SocialsUpdate, user=Depends(require_role("lojista", "admin"))):
+    nets = [{"network": n.network, "handle": (n.handle or "").strip(),
+             "url": (n.url or "").strip(), "enabled": bool(n.enabled)}
+            for n in body.networks if n.network in SUPPORTED_NETWORKS]
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"social_networks": nets}})
+    return {"networks": nets}
+
+
+@api.post("/marketing/campaign")
+async def marketing_create_campaign(body: CampaignReq, user=Depends(require_role("lojista", "admin"))):
+    # 1) Resolve product info (cadastrado ou manual)
+    if body.product_id:
+        p = await db.products.find_one({"id": body.product_id}, {"_id": 0})
+        if not p:
+            raise HTTPException(status_code=404, detail="Produto não encontrado")
+        product = {"name": p.get("name", ""), "details": p.get("description", ""),
+                   "category": p.get("category", ""), "price": f"R$ {float(p.get('price', 0)):.2f}",
+                   "image": p.get("image", "")}
+    else:
+        if not (body.product_name or "").strip():
+            raise HTTPException(status_code=400, detail="Informe um produto ou as informações do item")
+        product = {"name": body.product_name.strip(), "details": (body.product_details or "").strip(),
+                   "category": (body.category or "").strip(), "price": (body.price or "").strip(), "image": ""}
+
+    # 2) Redes-alvo (subset das do lojista; padrão = habilitadas ou todas)
+    networks = [n for n in (body.networks or []) if n in SUPPORTED_NETWORKS]
+    if not networks:
+        socials = user.get("social_networks") or []
+        networks = [s["network"] for s in socials if s.get("enabled") and s.get("network") in SUPPORTED_NETWORKS]
+    if not networks:
+        networks = list(SUPPORTED_NETWORKS.keys())
+
+    # 3) Copy (textos por rede)
+    try:
+        data = await _mkt_generate_copy(product, networks, body.language or "pt", body.tone)
+    except Exception as e:
+        logger.warning(f"marketing copy failed: {e}")
+        raise HTTPException(status_code=502, detail="Falha ao gerar os textos da campanha. Tente novamente.")
+    image_prompt = (data.get("image_prompt_en") or "").strip() or (
+        f"High-end commercial lifestyle photograph of {product['name']} in an aspirational real-world setting, "
+        "soft natural lighting, depth of field")
+
+    # 4) Imagem base por IA (usa a foto real do produto como referência, se houver)
+    ref = None
+    if product.get("image"):
+        try:
+            ref, _ = await run_in_threadpool(get_object, product["image"])
+        except Exception:
+            ref = None
+    try:
+        base_img = await _mkt_generate_image(image_prompt, ref)
+    except Exception as e:
+        logger.warning(f"marketing image failed: {e}")
+        base_img = None
+    if not base_img:
+        raise HTTPException(status_code=502, detail="Não foi possível gerar a imagem. Tente novamente.")
+
+    # 5) Recorta para o formato de cada rede + salva no storage
+    handles = {s.get("network"): s for s in (user.get("social_networks") or [])}
+    assets = []
+    for nk in networks:
+        cfg = SUPPORTED_NETWORKS[nk]
+        try:
+            variant = await run_in_threadpool(_cover_crop_bytes, base_img, cfg["w"], cfg["h"])
+            path = f"{APP_NAME}/campaigns/{user['user_id']}/{uuid.uuid4().hex}.jpg"
+            await run_in_threadpool(put_object, path, variant, "image/jpeg")
+        except Exception as e:
+            logger.warning(f"marketing asset {nk} failed: {e}")
+            continue
+        nc = (data.get("networks") or {}).get(nk) or {}
+        hh = handles.get(nk) or {}
+        assets.append({
+            "network": nk, "label": cfg["label"], "icon": cfg["icon"], "ratio": cfg["ratio"],
+            "w": cfg["w"], "h": cfg["h"], "image_path": path,
+            "caption": nc.get("caption", ""), "hashtags": nc.get("hashtags") or [], "cta": nc.get("cta", ""),
+            "profile_url": (hh.get("url") or hh.get("handle") or ""),
+        })
+    if not assets:
+        raise HTTPException(status_code=502, detail="Falha ao montar os formatos da campanha.")
+
+    doc = {"id": new_id("camp"), "owner_id": user["user_id"], "store_id": user.get("store_id"),
+           "product_name": product["name"], "concept": data.get("concept_pt", ""),
+           "image_prompt": image_prompt, "cover_path": assets[0]["image_path"],
+           "assets": assets, "created_at": now_iso()}
+    await db.campaigns.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/marketing/campaigns")
+async def marketing_list_campaigns(user=Depends(require_role("lojista", "admin"))):
+    q = {} if is_master(user) else {"owner_id": user["user_id"]}
+    return await db.campaigns.find(q, {"_id": 0, "assets": 0, "image_prompt": 0}).sort("created_at", -1).to_list(50)
+
+
+@api.get("/marketing/campaigns/{cid}")
+async def marketing_get_campaign(cid: str, user=Depends(require_role("lojista", "admin"))):
+    c = await db.campaigns.find_one({"id": cid}, {"_id": 0})
+    if not c or (not is_master(user) and c.get("owner_id") != user["user_id"]):
+        raise HTTPException(status_code=404, detail="Campanha não encontrada")
+    return c
+
+
+@api.delete("/marketing/campaigns/{cid}")
+async def marketing_delete_campaign(cid: str, user=Depends(require_role("lojista", "admin"))):
+    c = await db.campaigns.find_one({"id": cid})
+    if not c or (not is_master(user) and c.get("owner_id") != user["user_id"]):
+        raise HTTPException(status_code=404, detail="Campanha não encontrada")
+    await db.campaigns.delete_one({"id": cid})
+    return {"ok": True}
+
+
 @api.get("/webhooks/whatsapp")
 async def wa_verify(request: Request):
     params = request.query_params
@@ -2754,6 +2984,8 @@ async def startup():
         await db.users.create_index("email", unique=True)
         await db.users.create_index("user_id", unique=True)
         await db.users.create_index("username", unique=True, sparse=True)
+        await db.campaigns.create_index("owner_id")
+        await db.campaigns.create_index("created_at")
         await db.user_sessions.create_index("session_token", unique=True)
         await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
         await db.stores.create_index("id", unique=True)

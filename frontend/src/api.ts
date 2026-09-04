@@ -198,4 +198,13 @@ export const api = {
   // Translation
   translate: (texts: string[], target: string) =>
     apiRequest("/translate", { method: "POST", body: { texts, target }, auth: false }),
+
+  // Marketing / Campanhas IA
+  marketingSocials: () => apiRequest("/marketing/socials"),
+  saveMarketingSocials: (networks: any[]) =>
+    apiRequest("/marketing/socials", { method: "PUT", body: { networks } }),
+  createCampaign: (b: any) => apiRequest("/marketing/campaign", { method: "POST", body: b }),
+  campaigns: () => apiRequest("/marketing/campaigns"),
+  campaign: (id: string) => apiRequest(`/marketing/campaigns/${id}`),
+  deleteCampaign: (id: string) => apiRequest(`/marketing/campaigns/${id}`, { method: "DELETE" }),
 };

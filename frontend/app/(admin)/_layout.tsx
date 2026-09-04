@@ -42,6 +42,13 @@ export default function AdminLayout() {
         }}
       />
       <Tabs.Screen
+        name="marketing"
+        options={{
+          title: "Marketing",
+          tabBarIcon: ({ color, size }) => <Ionicons name="sparkles-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Perfil",
