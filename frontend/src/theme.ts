@@ -1,27 +1,40 @@
 export const colors = {
-  surface: "#FDFBF7",
-  onSurface: "#1A1C19",
-  surfaceSecondary: "#FFFFFF",
-  onSurfaceSecondary: "#1A1C19",
-  surfaceTertiary: "#F4F0EA",
-  onSurfaceTertiary: "#4A4C48",
-  surfaceInverse: "#2E312D",
+  surface: "#EAF1EE",
+  onSurface: "#0E1B16",
+  surfaceSecondary: "rgba(255,255,255,0.78)",
+  onSurfaceSecondary: "#0E1B16",
+  surfaceTertiary: "rgba(14,124,90,0.09)",
+  onSurfaceTertiary: "#3C4A44",
+  surfaceInverse: "#0E241C",
   onSurfaceInverse: "#FFFFFF",
-  brand: "#4A7C59",
-  brandPrimary: "#4A7C59",
+  brand: "#0E7C5A",
+  brandPrimary: "#0E7C5A",
   onBrandPrimary: "#FFFFFF",
-  brandSecondary: "#C16E53",
+  brandSecondary: "#E0824F",
   onBrandSecondary: "#FFFFFF",
-  brandTertiary: "#E9F0EC",
-  onBrandTertiary: "#2E513A",
-  success: "#3A6B4C",
-  warning: "#D48C46",
-  error: "#B34D4D",
+  brandTertiary: "#D8EBE2",
+  onBrandTertiary: "#0B4A36",
+  success: "#1E7A4F",
+  warning: "#E0954A",
+  error: "#C4514E",
   onError: "#FFFFFF",
-  border: "#E8E3DB",
-  borderStrong: "#D1C9BE",
-  divider: "#F0ECE5",
-  muted: "#8A8D86",
+  border: "rgba(14,27,22,0.10)",
+  borderStrong: "rgba(14,27,22,0.18)",
+  divider: "rgba(14,27,22,0.07)",
+  muted: "#7A857F",
+  // opaque surfaces (use for tab bars / places that must not bleed content)
+  solid: "#FFFFFF",
+  tabBar: "#F7FAF8",
+};
+
+// Translucent glass tokens for depth (use over tinted backgrounds or images)
+export const glass = {
+  card: "rgba(255,255,255,0.72)",
+  cardStrong: "rgba(255,255,255,0.86)",
+  tint: "rgba(255,255,255,0.55)",
+  dark: "rgba(14,36,28,0.5)",
+  border: "rgba(255,255,255,0.55)",
+  borderDark: "rgba(255,255,255,0.14)",
 };
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, "2xl": 32, "3xl": 48 };
@@ -30,28 +43,30 @@ export const font = { sm: 12, base: 14, lg: 16, xl: 20, "2xl": 24, "3xl": 30, "4
 
 // Immersive gradient palette (use with expo-linear-gradient)
 export const gradients = {
-  brand: ["#4A7C59", "#2E513A"] as const,
-  header: ["#2E513A", "#4A7C59", "#5E9A6F"] as const,
-  warm: ["#4A7C59", "#C16E53"] as const,
-  sunset: ["#C16E53", "#D48C46"] as const,
-  night: ["#2E312D", "#1A1C19"] as const,
-  scrimBottom: ["transparent", "rgba(26,28,25,0.0)", "rgba(26,28,25,0.85)"] as const,
+  brand: ["#0E7C5A", "#0B3D2E"] as const,
+  header: ["#0B3D2E", "#0E7C5A", "#37A98A"] as const,
+  warm: ["#0E7C5A", "#E0824F"] as const,
+  sunset: ["#E0824F", "#E0954A"] as const,
+  night: ["#0E241C", "#0A130F"] as const,
+  ocean: ["#0B3D2E", "#0E5E6E", "#127C71"] as const,
+  scrimBottom: ["transparent", "rgba(10,19,15,0.0)", "rgba(10,19,15,0.9)"] as const,
+  scrimCard: ["rgba(10,19,15,0.0)", "rgba(10,19,15,0.35)", "rgba(10,19,15,0.82)"] as const,
 };
 
 export const shadow = {
   card: {
-    shadowColor: "#1A1C19",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    shadowColor: "#0A130F",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    elevation: 3,
   },
   float: {
-    shadowColor: "#1A1C19",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowColor: "#0A130F",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 22,
+    elevation: 8,
   },
 };
 

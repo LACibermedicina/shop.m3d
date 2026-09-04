@@ -11,7 +11,7 @@ export default function AdminLayout() {
         tabBarActiveTintColor: colors.brandPrimary,
         tabBarInactiveTintColor: colors.muted,
         tabBarStyle: {
-          backgroundColor: colors.surfaceSecondary,
+          backgroundColor: colors.tabBar,
           borderTopColor: colors.border,
           height: Platform.OS === "ios" ? 88 : 64,
           paddingTop: spacing.sm,

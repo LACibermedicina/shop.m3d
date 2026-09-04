@@ -119,6 +119,9 @@ export function Field({
   multiline,
   testID,
   autoCapitalize,
+  secureTextEntry,
+  onSubmitEditing,
+  returnKeyType,
 }: any) {
   return (
     <View style={{ marginBottom: spacing.lg }}>
@@ -132,6 +135,9 @@ export function Field({
         keyboardType={keyboardType}
         multiline={multiline}
         autoCapitalize={autoCapitalize}
+        secureTextEntry={secureTextEntry}
+        onSubmitEditing={onSubmitEditing}
+        returnKeyType={returnKeyType}
         style={[styles.input, multiline && { height: 96, textAlignVertical: "top" }]}
       />
     </View>

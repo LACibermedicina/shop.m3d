@@ -91,6 +91,8 @@ export const api = {
       body: { email, role, name: email.split("@")[0] },
       auth: false,
     }),
+  login: (username: string, password: string) =>
+    apiRequest("/auth/login", { method: "POST", body: { username, password }, auth: false }),
   deleteAccount: () => apiRequest("/auth/me", { method: "DELETE" }),
   orderNotifications: (id: string, token?: string) =>
     apiRequest(`/orders/${id}/notifications${token ? `?token=${token}` : ""}`),

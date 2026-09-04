@@ -193,11 +193,25 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "PASSED: All 15 tests passed (100% success rate). Comprehensive regression testing performed: (1) Master creates store and product ✓ (2) Invite creation and acceptance ✓ (3) Cliente adds product to catalog ✓ (4) Order creation via catalog send ✓ (5) Master edits order (items, price, qty) - total correctly updated to 160 ✓ (6) Client notification recorded (channel=whatsapp, target=cliente) ✓ (7) Permission check: other cliente cannot edit order (403) ✓ (8) Status change to 'pronto' sets editable=false ✓ (9) Master can view order (200) ✓ (10) Owner cliente can view order (200) ✓. Order editing, notification recording, permission checks, and status management all working correctly."
+  - task: "Password login + fixed seeded accounts (root/admin/lojista/cliente)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "NEW: Added POST /api/auth/login {username,password} accepting username OR email. Added seed_accounts() idempotent on startup creating 4 accounts with bcrypt password_hash + whatsapp + role: root/@0root=master (wa 5511920946954), admin/@0admin=admin, lojista/@0lojista=lojista, cliente/@0cliente=cliente (all 5511960708817). password_hash excluded from get_current_user/optional_user/login response projections. Dev-login DISABLED (ALLOW_DEV_LOGIN=false). Self-verified via curl: root->master, admin->admin, wrong password->401. Please verify: (1) login all 4 accounts returns correct role + token; (2) login by email also works; (3) wrong password 401; (4) token works on /api/auth/me and does NOT leak password_hash; (5) dev-login returns 403; (6) existing endpoints (/api/stores, /api/home, /api/groups) still work; (7) master (root) can hit /api/master/overview."
+        -working: true
+        -agent: "testing"
+        -comment: "PASSED: 16/17 tests passed (94% success rate). Comprehensive password authentication testing performed: (1) Login all 4 accounts by username (root, admin, lojista, cliente) ✓ - correct roles (master, admin, lojista, cliente) and whatsapp numbers returned ✓ (2) Login by email works (root@m3d.pro -> master) ✓ (3) Wrong password returns 401 ✓ (4) Unknown user returns 401 ✓ (5) Token works on GET /api/auth/me ✓ (6) password_hash NOT leaked in any response (login, /auth/me) ✓ (7) Master can access GET /api/master/overview (200) with correct data structure ✓ (8) Cliente cannot access /api/master/overview (403) ✓ (9) Dev-login disabled (403) ✓ (10) All public endpoints work: GET /api/home (200), GET /api/stores (200), GET /api/groups (200), GET /api/whatsapp/status (200) ✓ (11) Seed idempotency verified - login again still works ✓. Minor: Missing field validation returns 422 (Unprocessable Entity) instead of 400 for Pydantic validation errors - this is correct FastAPI behavior. All critical password authentication features working correctly."
 
 metadata:
   created_by: "main_agent"
-  version: "1.4"
-  test_sequence: 4
+  version: "1.5"
+  test_sequence: 5
   run_ui: false
 
   - task: "Frontend: i18n (PT/EN/ES) + invite accept + personal catalog + multi-vendor send + invite mgmt"
@@ -233,11 +247,16 @@ metadata:
         -comment: "PASSED: All 31 tests passed (100% success rate). Comprehensive end-to-end testing performed: (1) Master auto-promotion ✓ (2) Store creation with admin_id field ✓ (3) Product creation ✓ (4) Invite-only access control BEFORE invite (stores hidden, 403 on direct access) ✓ (5) Invite creation with token+link ✓ (6) Public invite view ✓ (7) Invite acceptance and access verification ✓ (8) Personal catalog (add items, access control, filtering) ✓ (9) Catalog PDF report generation ✓ (10) Multi-vendor cart send (2 orders created, catalog cleared) ✓ (11) Vendor orders visibility ✓ (12) AI translation (Spanish, English, Portuguese) ✓ (13) Negative test (no invite = no access) ✓. CRITICAL BUG FIXED: optional_user datetime comparison issue causing 500 errors on /stores and /home endpoints. All invite-only, personal catalog, multi-vendor cart, and AI translation features working correctly."
 
 test_plan:
-  current_focus:
-    - "Order editing + client notification"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "NEW AUTH round. Environment was re-provisioned (empty .env, empty node_modules) - restored: recreated .env with this container's preview URL + EMERGENT_LLM_KEY, reinstalled deps, services RUNNING. Then implemented password login + 4 seeded accounts (see task 'Password login + fixed seeded accounts'). Please test ONLY the auth changes and confirm existing public endpoints still respond. Credentials in /app/memory/test_credentials.md. Do NOT expect seeded stores/products (DB intentionally empty, no demo data per user)."
+    -agent: "testing"
+    -message: "PASSWORD AUTH TESTING COMPLETE - 16/17 tests PASSED (94% success rate). All critical password authentication features working correctly: ✓ Login all 4 accounts (root/admin/lojista/cliente) by username and email ✓ Correct roles and whatsapp numbers ✓ password_hash NOT leaked in any response ✓ Wrong password/unknown user return 401 ✓ Token works on /api/auth/me ✓ Master can access /api/master/overview ✓ Cliente restricted from master endpoints (403) ✓ Dev-login disabled (403) ✓ All public endpoints working (/api/home, /api/stores, /api/groups, /api/whatsapp/status) ✓ Seed idempotency verified. Minor: Pydantic validation returns 422 instead of 400 for missing fields (correct FastAPI behavior). No security issues found. Backend is production-ready."
 
 agent_communication:
     -agent: "main"

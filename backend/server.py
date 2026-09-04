@@ -15,6 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+from passlib.context import CryptContext
 import httpx
 import requests
 
@@ -94,6 +95,21 @@ def new_id(prefix="id"):
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 
 
+# ------------------------------------------------------------------ Password helpers
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def hash_password(raw: str) -> str:
+    return pwd_ctx.hash(raw)
+
+
+def verify_password(raw: str, hashed: str) -> bool:
+    try:
+        return pwd_ctx.verify(raw, hashed or "")
+    except Exception:
+        return False
+
+
 # ------------------------------------------------------------------ Models
 class DevLogin(BaseModel):
     email: str
@@ -103,6 +119,11 @@ class DevLogin(BaseModel):
 
 class SessionReq(BaseModel):
     session_id: str
+
+
+class LoginReq(BaseModel):
+    username: str
+    password: str
 
 
 class StoreIn(BaseModel):
@@ -256,7 +277,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
         exp = exp.replace(tzinfo=timezone.utc)
     if exp < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Sessão expirada")
-    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0, "password_hash": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
     return user
@@ -298,7 +319,7 @@ async def optional_user(authorization: Optional[str] = Header(None)):
             exp = exp.replace(tzinfo=timezone.utc)
         if exp < datetime.now(timezone.utc):
             return None
-    return await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0})
+    return await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
 
 
 async def client_store_ids(user) -> List[str]:
@@ -389,6 +410,22 @@ async def dev_login(body: DevLogin):
                                    "picture": "", "role": role, "store_id": None, "created_at": now_iso()})
     token = await create_session(uid)
     user = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    return {"session_token": token, "user": user}
+
+
+@api.post("/auth/login")
+async def auth_login(body: LoginReq):
+    """Password login. Accepts username OR e-mail in the 'username' field."""
+    ident = (body.username or "").strip().lower()
+    if not ident or not body.password:
+        raise HTTPException(status_code=400, detail="Informe usuário e senha")
+    user = await db.users.find_one({"$or": [{"username": ident}, {"email": ident}]})
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Usuário ou senha inválidos")
+    if not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Usuário ou senha inválidos")
+    token = await create_session(user["user_id"])
+    user = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
     return {"session_token": token, "user": user}
 
 
@@ -1357,6 +1394,39 @@ async def seed_groups():
         for g in DEFAULT_GROUPS:
             await db.groups.insert_one({"id": new_id("grp"), "name": g["name"], "description": "",
                                         "icon": g["icon"], "color": g["color"], "created_at": now_iso()})
+
+
+# Fixed system accounts (username / password / role / whatsapp)
+SEED_ACCOUNTS = [
+    {"username": "root", "email": "root@m3d.pro", "name": "Root", "password": "@0root",
+     "role": "master", "whatsapp": "5511920946954"},
+    {"username": "admin", "email": "admin@m3d.pro", "name": "Administrador", "password": "@0admin",
+     "role": "admin", "whatsapp": "5511960708817"},
+    {"username": "lojista", "email": "lojista@m3d.pro", "name": "Lojista", "password": "@0lojista",
+     "role": "lojista", "whatsapp": "5511960708817"},
+    {"username": "cliente", "email": "cliente@m3d.pro", "name": "Cliente", "password": "@0cliente",
+     "role": "cliente", "whatsapp": "5511960708817"},
+]
+
+
+async def seed_accounts():
+    """Idempotent: ensures the fixed system accounts exist with the right role/password/whatsapp."""
+    for acc in SEED_ACCOUNTS:
+        existing = await db.users.find_one({"$or": [{"username": acc["username"]}, {"email": acc["email"]}]})
+        fields = {
+            "username": acc["username"],
+            "email": acc["email"],
+            "name": acc["name"],
+            "role": acc["role"],
+            "whatsapp": acc["whatsapp"],
+            "password_hash": hash_password(acc["password"]),
+        }
+        if existing:
+            await db.users.update_one({"user_id": existing["user_id"]}, {"$set": fields})
+        else:
+            fields.update({"user_id": f"user_{uuid.uuid4().hex[:12]}", "picture": "",
+                           "store_id": None, "created_at": now_iso()})
+            await db.users.insert_one(fields)
 
 
 @api.get("/groups")
@@ -2683,6 +2753,7 @@ async def startup():
     try:
         await db.users.create_index("email", unique=True)
         await db.users.create_index("user_id", unique=True)
+        await db.users.create_index("username", unique=True, sparse=True)
         await db.user_sessions.create_index("session_token", unique=True)
         await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
         await db.stores.create_index("id", unique=True)
@@ -2702,6 +2773,11 @@ async def startup():
         await seed_groups()
     except Exception as e:
         logger.warning(f"seed groups failed: {e}")
+    try:
+        await seed_accounts()
+        logger.info("system accounts seeded")
+    except Exception as e:
+        logger.warning(f"seed accounts failed: {e}")
 
 
 @app.on_event("shutdown")

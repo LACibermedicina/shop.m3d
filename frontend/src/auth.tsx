@@ -9,6 +9,7 @@ WebBrowser.maybeCompleteAuthSession();
 export type User = {
   user_id: string;
   email: string;
+  username?: string;
   name: string;
   picture?: string;
   role: "admin" | "lojista" | "cliente" | "master";
@@ -21,6 +22,7 @@ type AuthCtx = {
   loading: boolean;
   loginGoogle: () => Promise<void>;
   devLogin: (email: string, role: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   deleteAccount: () => Promise<void>;
@@ -135,6 +137,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(res.user);
   }, []);
 
+  const login = useCallback(async (username: string, password: string) => {
+    const res = await api.login(username, password);
+    await setToken(res.session_token);
+    setUser(res.user);
+  }, []);
+
   const deleteAccount = useCallback(async () => {
     try {
       await api.deleteAccount();
@@ -152,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={{ user, loading, loginGoogle, devLogin, logout, refresh, deleteAccount }}>
+    <Ctx.Provider value={{ user, loading, loginGoogle, devLogin, login, logout, refresh, deleteAccount }}>
       {children}
     </Ctx.Provider>
   );

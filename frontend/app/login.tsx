@@ -14,46 +14,36 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/src/auth";
-import { Button, Field, useToast, Chip } from "@/src/ui";
-import { colors, spacing, radius, font, shadow } from "@/src/theme";
+import { Button, Field, useToast } from "@/src/ui";
+import { colors, spacing, radius, font, shadow, glass } from "@/src/theme";
 import { HERO_IMAGE } from "@/src/images";
 
 const HERO = HERO_IMAGE;
 
-const DEV_ENABLED = process.env.EXPO_PUBLIC_ENABLE_DEV_LOGIN === "true";
-
 export default function Login() {
-  const { user, loginGoogle, devLogin } = useAuth();
+  const { user, login } = useAuth();
   const router = useRouter();
   const toast = useToast();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
-  const [devOpen, setDevOpen] = useState(false);
-  const [role, setRole] = useState("cliente");
-  const [email, setEmail] = useState("cliente@feira.test");
-  const [mode, setMode] = useState<"cliente" | "merchant">("cliente");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
 
   useEffect(() => {
     if (user) router.replace("/");
   }, [user]);
 
-  const handleGoogle = async () => {
+  const handleLogin = async () => {
+    if (!username.trim() || !password) {
+      toast("Informe usuário e senha", "info");
+      return;
+    }
     setBusy(true);
     try {
-      await loginGoogle();
+      await login(username.trim(), password);
     } catch (e: any) {
       toast(e.message || "Falha no login", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDev = async () => {
-    setBusy(true);
-    try {
-      await devLogin(email.trim(), role);
-    } catch (e: any) {
-      toast(e.message || "Falha no login de teste", "error");
     } finally {
       setBusy(false);
     }
@@ -62,134 +52,96 @@ export default function Login() {
   return (
     <View style={styles.container}>
       <Image source={{ uri: HERO }} style={styles.hero} contentFit="cover" />
+      {/* Scrim imersivo: escurece a base para dar profundidade ao card */}
       <LinearGradient
-        colors={["transparent", "rgba(253,251,247,0.6)", colors.surface]}
-        locations={[0, 0.55, 1]}
-        style={styles.scrim}
+        colors={["rgba(10,19,15,0.15)", "rgba(10,19,15,0.55)", "rgba(10,19,15,0.92)"]}
+        locations={[0, 0.5, 1]}
+        style={StyleSheet.absoluteFill}
       />
+
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.flex}
       >
         <ScrollView
-          contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.xl }]}
+          contentContainerStyle={[
+            styles.scroll,
+            { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.xl },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Marca no topo, sobre a imagem */}
+          <View style={styles.topBrand}>
+            <Image
+              source={require("../assets/images/m3d-logo.png")}
+              style={styles.brandLogo}
+              contentFit="contain"
+            />
+            <Text style={styles.brandTop}>shop.m3d.pro</Text>
+            <Text style={styles.tagline}>
+              Lojas por áreas de interesse. Compre de quem entende, numa rede de confiança.
+            </Text>
+          </View>
+
           <View style={styles.card}>
-            <View style={styles.logoRow}>
-              <Image
-                source={require("../assets/images/m3d-logo.png")}
-                style={styles.brandLogo}
-                contentFit="contain"
-              />
-              <Text style={styles.brand}>m3d.pro</Text>
-            </View>
-            <Text style={styles.subtitle}>
-              {mode === "cliente"
-                ? "Lojas por áreas de interesse. Compre de quem entende, numa rede de confiança entre clientes e lojistas."
-                : "Área de lojistas e administradores do shop.m3d.pro."}
-            </Text>
+            <Text style={styles.cardTitle}>Entrar</Text>
+            <Text style={styles.cardSub}>Acesse com seu usuário e senha</Text>
 
-            <View style={styles.segment}>
-              <Pressable
-                testID="mode-cliente"
-                onPress={() => setMode("cliente")}
-                style={[styles.segmentItem, mode === "cliente" && styles.segmentActive]}
-              >
-                <Ionicons
-                  name="person-outline"
-                  size={16}
-                  color={mode === "cliente" ? "#fff" : colors.onSurfaceTertiary}
+            <View style={styles.inputWrap}>
+              <Ionicons name="person-outline" size={18} color={colors.brandPrimary} style={styles.inputIcon} />
+              <View style={{ flex: 1 }}>
+                <Field
+                  testID="login-username"
+                  label="Usuário"
+                  value={username}
+                  onChangeText={setUsername}
+                  placeholder="root, admin, lojista ou cliente"
+                  autoCapitalize="none"
                 />
-                <Text style={[styles.segmentText, mode === "cliente" && styles.segmentTextActive]}>
-                  Cliente
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="mode-merchant"
-                onPress={() => setMode("merchant")}
-                style={[styles.segmentItem, mode === "merchant" && styles.segmentActive]}
-              >
-                <Ionicons
-                  name="briefcase-outline"
-                  size={16}
-                  color={mode === "merchant" ? "#fff" : colors.onSurfaceTertiary}
-                />
-                <Text style={[styles.segmentText, mode === "merchant" && styles.segmentTextActive]}>
-                  Lojista / Admin
-                </Text>
-              </Pressable>
-            </View>
-
-            <Pressable
-              testID="google-signin-button"
-              onPress={handleGoogle}
-              disabled={busy}
-              style={({ pressed }) => [styles.googleBtn, pressed && { opacity: 0.85 }]}
-            >
-              <Ionicons name="logo-google" size={20} color={colors.onSurface} />
-              <Text style={styles.googleText}>
-                {mode === "cliente" ? "Entrar como cliente" : "Entrar como lojista/admin"}
-              </Text>
-            </Pressable>
-            <Text style={styles.accessNote}>
-              {mode === "cliente"
-                ? "Seu acesso é identificado automaticamente ao entrar."
-                : "Acesso liberado apenas para contas de lojista ou administrador."}
-            </Text>
-
-            {DEV_ENABLED && (
-              <View style={styles.devBox}>
-                <Pressable
-                  testID="dev-login-toggle"
-                  onPress={() => setDevOpen((v) => !v)}
-                  style={styles.devToggle}
-                >
-                  <Ionicons name="construct-outline" size={16} color={colors.onSurfaceTertiary} />
-                  <Text style={styles.devToggleText}>Entrar como teste (dev)</Text>
-                  <Ionicons
-                    name={devOpen ? "chevron-up" : "chevron-down"}
-                    size={16}
-                    color={colors.onSurfaceTertiary}
-                  />
-                </Pressable>
-                {devOpen && (
-                  <View style={{ marginTop: spacing.md }}>
-                    <View style={styles.roleRow}>
-                      {["cliente", "lojista", "admin"].map((r) => (
-                        <Chip
-                          key={r}
-                          testID={`dev-role-${r}`}
-                          label={r}
-                          active={role === r}
-                          onPress={() => {
-                            setRole(r);
-                            setEmail((prev) =>
-                              prev.endsWith("@feira.test") || prev === "" ? `${r}@feira.test` : prev
-                            );
-                          }}
-                        />
-                      ))}
-                    </View>
-                    <View style={{ height: spacing.md }} />
-                    <Field
-                      testID="dev-email-input"
-                      label="E-mail de teste"
-                      value={email}
-                      onChangeText={setEmail}
-                      autoCapitalize="none"
-                    />
-                    <Button
-                      title="Entrar (teste)"
-                      onPress={handleDev}
-                      loading={busy}
-                      testID="dev-login-button"
-                      variant="outline"
-                    />
-                  </View>
-                )}
               </View>
-            )}
+            </View>
+
+            <View style={styles.inputWrap}>
+              <Ionicons name="lock-closed-outline" size={18} color={colors.brandPrimary} style={styles.inputIcon} />
+              <View style={{ flex: 1 }}>
+                <Field
+                  testID="login-password"
+                  label="Senha"
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Sua senha"
+                  autoCapitalize="none"
+                  secureTextEntry={!showPass}
+                  returnKeyType="go"
+                  onSubmitEditing={handleLogin}
+                />
+              </View>
+              <Pressable
+                testID="toggle-password"
+                onPress={() => setShowPass((v) => !v)}
+                style={styles.eyeBtn}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name={showPass ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={colors.onSurfaceTertiary}
+                />
+              </Pressable>
+            </View>
+
+            <Button
+              title="Entrar"
+              onPress={handleLogin}
+              loading={busy}
+              testID="login-button"
+              icon="log-in-outline"
+            />
+
+            <View style={styles.footerRow}>
+              <Ionicons name="shield-checkmark-outline" size={14} color={colors.muted} />
+              <Text style={styles.footerText}>Acesso seguro · rede de confiança m3d.pro</Text>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -199,63 +151,45 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { flex: 1, backgroundColor: colors.surface },
-  hero: { position: "absolute", top: 0, left: 0, right: 0, height: "55%" },
-  scrim: { position: "absolute", top: 0, left: 0, right: 0, height: "60%" },
+  container: { flex: 1, backgroundColor: "#0A130F" },
+  hero: { ...StyleSheet.absoluteFillObject, height: "60%" },
   scroll: { flexGrow: 1, justifyContent: "flex-end", padding: spacing.lg },
+  topBrand: { alignItems: "center", marginBottom: spacing.xl },
+  brandLogo: { width: 64, height: 64, borderRadius: radius.md, marginBottom: spacing.sm },
+  brandTop: { fontSize: font["3xl"], fontWeight: "800", color: "#fff", letterSpacing: 0.3 },
+  tagline: {
+    fontSize: font.base,
+    color: "rgba(255,255,255,0.88)",
+    textAlign: "center",
+    marginTop: spacing.sm,
+    lineHeight: 20,
+    paddingHorizontal: spacing.lg,
+  },
   card: {
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.lg,
+    backgroundColor: glass.cardStrong,
+    borderRadius: radius.xl,
     padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: glass.border,
     ...shadow.float,
   },
-  logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.sm },
-  logoBadge: {
-    width: 48,
+  cardTitle: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
+  cardSub: { fontSize: font.base, color: colors.onSurfaceTertiary, marginTop: 2, marginBottom: spacing.lg },
+  inputWrap: { flexDirection: "row", alignItems: "flex-start" },
+  inputIcon: { marginTop: 38, marginRight: spacing.sm },
+  eyeBtn: {
+    width: 40,
     height: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.brandPrimary,
+    marginTop: 26,
     alignItems: "center",
     justifyContent: "center",
   },
-  brandLogo: { width: 56, height: 56, borderRadius: radius.md },
-  brand: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
-  subtitle: { fontSize: font.lg, color: colors.onSurfaceTertiary, marginBottom: spacing.lg, lineHeight: 22 },
-  segment: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceTertiary,
-    borderRadius: radius.md,
-    padding: 4,
-    marginBottom: spacing.lg,
-    gap: 4,
-  },
-  segmentItem: {
-    flex: 1,
+  footerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: spacing.xs,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
+    marginTop: spacing.lg,
   },
-  segmentActive: { backgroundColor: colors.brandPrimary },
-  segmentText: { fontSize: font.base, fontWeight: "700", color: colors.onSurfaceTertiary },
-  segmentTextActive: { color: "#fff" },
-  accessNote: { fontSize: font.sm, color: colors.muted, marginTop: spacing.sm, textAlign: "center" },
-  googleBtn: {
-    height: 54,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.surfaceSecondary,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-  },
-  googleText: { fontSize: font.lg, fontWeight: "700", color: colors.onSurface },
-  devBox: { marginTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: spacing.md },
-  devToggle: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm },
-  devToggleText: { fontSize: font.base, color: colors.onSurfaceTertiary, fontWeight: "600" },
-  roleRow: { flexDirection: "row", gap: spacing.sm },
+  footerText: { fontSize: font.sm, color: colors.muted },
 });
