@@ -1,12 +1,12 @@
-# M3D.Pro Catálogo v0.01
+# SHOP.M3D.pro (versão: catalogo)
 
-Uma plataforma de **lojas virtuais organizadas por áreas de interesse e grupos de usuários**, desenvolvida como a versão inicial do ecossistema **shop.m3d.pro**.
+Uma plataforma de **lojas virtuais organizadas por áreas de interesse e grupos de usuários**. Este repositório contém a versão chamada **catalogo** do projeto **SHOP**, que faz parte do ecossistema **M3D.pro**.
 
 ## 🎯 Visão Geral
 
-O **M3D.Pro Catálogo** é um aplicativo móvel e web que funciona como uma **rede de indicações baseada em grupos de interesse**, conectando clientes e lojistas de forma vinculativa. Nosso objet[...] 
+O **SHOP.M3D.pro (versão: catalogo)** é um aplicativo móvel e web que funciona como uma **rede de indicações baseada em grupos de interesse**, conectando clientes e lojistas de forma vinculativa. Nosso objetivo é facilitar conexões de confiança entre consumidores e vendedores por meio de comunidades temáticas.
 
-### Por Que M3D.Pro?
+### Por Que SHOP.M3D.pro?
 
 - 🤝 **Relacionamento Direto**: Conexão próxima entre clientes e vendedores, baseada em confiança
 - 🎯 **Grupos de Interesse**: Organização customizada que facilita o encontro de produtos relevantes
@@ -39,7 +39,7 @@ O **M3D.Pro Catálogo** é um aplicativo móvel e web que funciona como uma **re
 ## 🚀 Começando
 
 ### Pré-requisitos
-- Node.js 18+ 
+- Node.js 18+
 - npm ou yarn
 - Expo CLI (para desenvolvimento móvel)
 
@@ -78,21 +78,21 @@ npx expo start --web
 
 ## 📚 Documentação
 
-Para informações mais detalhadas, consulte:
-- [Arquitetura do Aplicativo](./docs/ARCHITECTURE.md)
-- [Guia do Usuário](./docs/USER_GUIDE.md)
-- [Guia do Lojista](./docs/VENDOR_GUIDE.md)
-- [Especificações Técnicas](./docs/TECHNICAL_SPECS.md)
-- [Roadmap do Projeto](./docs/ROADMAP.md)
+Para informações mais detalhadas, consulte os arquivos dentro de docs/ (caso não existam ainda, podemos criá-los):
+- Arquitetura do Aplicativo (docs/ARCHITECTURE.md)
+- Guia do Usuário (docs/USER_GUIDE.md)
+- Guia do Lojista (docs/VENDOR_GUIDE.md)
+- Especificações Técnicas (docs/TECHNICAL_SPECS.md)
+- Roadmap do Projeto (docs/ROADMAP.md)
 
 ## 🔄 Ciclo de Vida do Projeto
 
-### Versão 0.01 (Atual - Catálogo)
+### Versão catalogo (0.01)
 Implementação inicial com:
 - Prototipagem de interface
 - Modelo básico de dados
 - Estrutura de grupos de interesse
-- Catalogo de produtos inicial
+- Catálogo de produtos inicial
 
 ### Próximas Versões (Roadmap)
 - Sistema de pagamento integrado
@@ -116,14 +116,12 @@ Este projeto está sob a licença MIT. Veja [LICENSE](./LICENSE) para mais detal
 
 ## 📞 Suporte e Contato
 
-- 📧 Email: contato@lacibermedicina.com
-- 🐦 Twitter: [@shop_m3d_pro](https://twitter.com/shop_m3d_pro)
-- 💬 Discord: [Comunidade M3D.Pro](https://discord.gg/m3dpro)
+- 📧 Email: shop@m3d.pro
 
 ## 🙏 Agradecimentos
 
-Agradecemos a todos os contribuidores e membros da comunidade que ajudam a tornar o M3D.Pro uma realidade.
+Agradecemos a todos os contribuidores e membros da comunidade que ajudam a tornar o M3D.pro uma realidade.
 
 ---
 
-**Versão**: 0.01 | **Última atualização**: Setembro 2026
+**Versão**: catalogo (0.01) | **Última atualização**: Setembro 2026
