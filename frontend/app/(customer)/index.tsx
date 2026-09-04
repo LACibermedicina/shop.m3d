@@ -356,8 +356,8 @@ export default function Marketplace() {
             <Ionicons name="basket" size={20} color="#fff" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.hello}>Lojas da Fronteira</Text>
-            <Text style={styles.subtitle}>{t("Tríplice Fronteira · compre sem sair de casa")}</Text>
+            <Text style={styles.hello}>shop.m3d.pro</Text>
+            <Text style={styles.subtitle}>{t("Compre de quem entende, na sua rede de confiança")}</Text>
           </View>
         </View>
         {searchBar}

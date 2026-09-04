@@ -77,15 +77,17 @@ export default function Login() {
         >
           <View style={styles.card}>
             <View style={styles.logoRow}>
-              <View style={styles.logoBadge}>
-                <Ionicons name="basket" size={26} color="#fff" />
-              </View>
-              <Text style={styles.brand}>Lojas da Fronteira</Text>
+              <Image
+                source={require("../assets/images/m3d-logo.png")}
+                style={styles.brandLogo}
+                contentFit="contain"
+              />
+              <Text style={styles.brand}>m3d.pro</Text>
             </View>
             <Text style={styles.subtitle}>
               {mode === "cliente"
-                ? "Compre nas lojas da Tríplice Fronteira, sem sair de casa."
-                : "Área de lojistas e administradores da plataforma."}
+                ? "Lojas por áreas de interesse. Compre de quem entende, numa rede de confiança entre clientes e lojistas."
+                : "Área de lojistas e administradores do shop.m3d.pro."}
             </Text>
 
             <View style={styles.segment}>
@@ -216,6 +218,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  brandLogo: { width: 56, height: 56, borderRadius: radius.md },
   brand: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
   subtitle: { fontSize: font.lg, color: colors.onSurfaceTertiary, marginBottom: spacing.lg, lineHeight: 22 },
   segment: {

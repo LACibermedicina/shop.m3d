@@ -144,6 +144,19 @@ export function ProfileScreen() {
         </View>
 
         <View style={{ height: spacing.xl }} />
+        <View style={styles.aboutCard}>
+          <View style={styles.waHead}>
+            <Ionicons name="sparkles-outline" size={18} color={colors.brandPrimary} />
+            <Text style={styles.waTitle}>{t("Sobre o shop.m3d.pro")}</Text>
+          </View>
+          <Text style={styles.aboutText}>
+            {t(
+              "Uma rede de lojas virtuais organizadas por áreas de interesse e grupos de usuários. Aproxima clientes e vendedores numa relação de confiança, com indicações e distribuição personalizada — reduzindo a publicidade predatória e promovendo um consumo mais consciente e humano."
+            )}
+          </Text>
+        </View>
+
+        <View style={{ height: spacing.xl }} />
         <Button title={t("Sair")} icon="log-out-outline" variant="danger" onPress={doLogout} testID="logout-button" />
         <Pressable testID="delete-account-button" onPress={() => setConfirmDelete(true)} style={styles.deleteLink}>
           <Ionicons name="trash-outline" size={16} color={colors.error} />
@@ -236,6 +249,8 @@ const styles = StyleSheet.create({
   },
   deleteText: { color: colors.error, fontSize: font.base, fontWeight: "600" },
   waCard: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, ...shadow.card },
+  aboutCard: { backgroundColor: colors.brandTertiary, borderRadius: radius.lg, padding: spacing.lg },
+  aboutText: { fontSize: font.base, color: colors.onSurface, lineHeight: 21, marginTop: spacing.xs },
   waHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
   waTitle: { fontSize: font.base, fontWeight: "700", color: colors.onSurface, flex: 1 },
   overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: spacing.xl },

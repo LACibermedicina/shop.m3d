@@ -10,12 +10,13 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { useI18n } from "@/src/i18n";
 import { Loading, ErrorState, Button, StatusBadge, useToast } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { colors, spacing, radius, font, shadow, money, gradients } from "@/src/theme";
 
 const VENDOR_STATUSES = [
   { key: "novo", label: "Novo" },
@@ -136,13 +137,13 @@ export default function OrderDetail() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+      <LinearGradient colors={gradients.header} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <Pressable testID="order-back" onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.onSurface} />
+          <Ionicons name="chevron-back" size={24} color="#fff" />
         </Pressable>
-        <Text style={styles.title}>Pedido</Text>
+        <Text style={styles.title}>{t("Pedido")}</Text>
         <View style={{ width: 40 }} />
-      </View>
+      </LinearGradient>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 160 }}>
         <View style={styles.card}>
@@ -306,17 +307,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    ...shadow.card,
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.surfaceTertiary,
+    backgroundColor: "rgba(255,255,255,0.18)",
     alignItems: "center",
     justifyContent: "center",
   },
-  title: { fontSize: font.xl, fontWeight: "800", color: colors.onSurface },
+  title: { fontSize: font.xl, fontWeight: "800", color: "#fff" },
   card: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.lg,
