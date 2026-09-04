@@ -74,13 +74,17 @@ export default function AdminStores() {
   const [logoUri, setLogoUri] = useState("");
   const [featured, setFeatured] = useState(false);
   const [adminId, setAdminId] = useState<string | null>(null);
+  const [groups, setGroups] = useState<any[]>([]);
+  const [selGroups, setSelGroups] = useState<string[]>([]);
+  const [newGroup, setNewGroup] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await api.stores();
+      const [data, grps] = await Promise.all([api.stores(), api.groups().catch(() => [])]);
       const scoped = isMaster ? data : data.filter((s: any) => s.admin_id === me?.user_id);
       setStores(scoped);
+      setGroups(grps || []);
       if (isMaster) {
         try {
           const us = await api.users();
@@ -109,6 +113,7 @@ export default function AdminStores() {
     setLogoUri("");
     setFeatured(false);
     setAdminId(isMaster ? null : me?.user_id ?? null);
+    setSelGroups([]);
     setFormOpen(true);
   };
 
@@ -122,6 +127,7 @@ export default function AdminStores() {
     setLogoUri("");
     setFeatured(!!s.featured);
     setAdminId(s.admin_id ?? null);
+    setSelGroups(s.group_ids || []);
     setFormOpen(true);
   };
 
@@ -155,7 +161,7 @@ export default function AdminStores() {
     }
     setSaving(true);
     try {
-      const body: any = { name, description: desc, whatsapp: whats, admin_whatsapp: adminWhats, logo: logoPath, featured };
+      const body: any = { name, description: desc, whatsapp: whats, admin_whatsapp: adminWhats, logo: logoPath, featured, group_ids: selGroups };
       if (isMaster) body.admin_id = adminId || undefined;
       if (editing) {
         await api.updateStore(editing.id, body);
@@ -370,6 +376,51 @@ export default function AdminStores() {
                   </ScrollView>
                 </View>
               )}
+              <View style={{ marginBottom: spacing.lg }}>
+                <Text style={styles.switchLabel}>Áreas de interesse</Text>
+                <Text style={styles.switchHint}>Classifique a loja por grupos (o cliente filtra por área)</Text>
+                <View style={styles.groupWrap}>
+                  {groups.map((g) => {
+                    const on = selGroups.includes(g.id);
+                    return (
+                      <Pressable
+                        key={g.id}
+                        testID={`store-group-${g.id}`}
+                        onPress={() =>
+                          setSelGroups((prev) => (on ? prev.filter((x) => x !== g.id) : [...prev, g.id]))
+                        }
+                        style={[styles.grpChip, on && { backgroundColor: g.color || colors.brandPrimary, borderColor: g.color || colors.brandPrimary }]}
+                      >
+                        <Ionicons name={g.icon || "pricetags"} size={14} color={on ? "#fff" : g.color || colors.brandPrimary} />
+                        <Text style={[styles.grpChipText, { color: on ? "#fff" : g.color || colors.brandPrimary }]}>{g.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={styles.newGroupRow}>
+                  <View style={{ flex: 1 }}>
+                    <Field testID="new-group-input" value={newGroup} onChangeText={setNewGroup} placeholder="Nova área (ex: Pet Shop)" />
+                  </View>
+                  <Pressable
+                    testID="add-group-button"
+                    onPress={async () => {
+                      if (!newGroup.trim()) return;
+                      try {
+                        const g = await api.createGroup(newGroup.trim());
+                        setGroups((prev) => [...prev, g]);
+                        setSelGroups((prev) => [...prev, g.id]);
+                        setNewGroup("");
+                        toast("Área criada", "success");
+                      } catch (e: any) {
+                        toast(e.message || "Falha", "error");
+                      }
+                    }}
+                    style={styles.addGroupBtn}
+                  >
+                    <Ionicons name="add" size={22} color="#fff" />
+                  </Pressable>
+                </View>
+              </View>
               <Button title="Salvar loja" onPress={save} loading={saving} testID="save-store-button" />
             </ScrollView>
           </View>
@@ -399,6 +450,28 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
+  groupWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm },
+  grpChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  grpChipText: { fontSize: font.sm, fontWeight: "700" },
+  newGroupRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, marginTop: spacing.sm },
+  addGroupBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   card: {
     flexDirection: "row",
     alignItems: "center",

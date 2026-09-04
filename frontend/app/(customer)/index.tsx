@@ -51,6 +51,8 @@ export default function Marketplace() {
   const [featured, setFeatured] = useState<Store[]>([]);
   const [newProducts, setNewProducts] = useState<any[]>([]);
   const [favIds, setFavIds] = useState<string[]>([]);
+  const [groups, setGroups] = useState<any[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<string>("");
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -59,15 +61,17 @@ export default function Marketplace() {
 
   const load = useCallback(async () => {
     try {
-      const [list, home, favs] = await Promise.all([
+      const [list, home, favs, grps] = await Promise.all([
         api.stores(),
         api.home(),
         api.favoriteIds().catch(() => []),
+        api.groups().catch(() => []),
       ]);
       setStores(list);
       setFeatured(home.featured_stores || []);
       setNewProducts(home.new_products || []);
       setFavIds(favs || []);
+      setGroups(grps || []);
       setState("done");
     } catch {
       setState("error");
@@ -270,7 +274,38 @@ export default function Marketplace() {
           </ScrollView>
         </View>
       )}
-      <Text style={styles.sectionTitle}>{t("Todas as lojas")}</Text>
+      {groups.length > 0 && (
+        <View style={{ marginBottom: spacing.lg }}>
+          <Text style={styles.sectionTitle}>🧭 {t("Áreas de interesse")}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hRow}>
+            <Pressable
+              testID="group-all"
+              onPress={() => setSelectedGroup("")}
+              style={[styles.groupChip, !selectedGroup && styles.groupChipActive]}
+            >
+              <Ionicons name="apps" size={18} color={!selectedGroup ? "#fff" : colors.brandPrimary} />
+              <Text style={[styles.groupChipText, !selectedGroup && { color: "#fff" }]}>{t("Todas")}</Text>
+            </Pressable>
+            {groups.map((g) => {
+              const active = selectedGroup === g.id;
+              return (
+                <Pressable
+                  key={g.id}
+                  testID={`group-${g.id}`}
+                  onPress={() => setSelectedGroup(active ? "" : g.id)}
+                  style={[styles.groupChip, active && { backgroundColor: g.color || colors.brandPrimary, borderColor: g.color || colors.brandPrimary }]}
+                >
+                  <Ionicons name={g.icon || "pricetags"} size={18} color={active ? "#fff" : g.color || colors.brandPrimary} />
+                  <Text style={[styles.groupChipText, active && { color: "#fff" }, !active && { color: g.color || colors.brandPrimary }]}>
+                    {t(g.name)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+      <Text style={styles.sectionTitle}>{selectedGroup ? t(groups.find((g) => g.id === selectedGroup)?.name || "Lojas") : t("Todas as lojas")}</Text>
     </View>
   );
 
@@ -371,7 +406,7 @@ export default function Marketplace() {
         renderSearch()
       ) : (
         <FlatList
-          data={stores}
+          data={selectedGroup ? stores.filter((s: any) => (s.group_ids || []).includes(selectedGroup)) : stores}
           keyExtractor={(s) => s.id}
           renderItem={renderCard}
           numColumns={2}
@@ -403,6 +438,19 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  groupChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    height: 40,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  groupChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  groupChipText: { fontSize: font.base, fontWeight: "700", color: colors.onSurface },
   topBar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: spacing.sm },
   brandBadge: {
     width: 40,

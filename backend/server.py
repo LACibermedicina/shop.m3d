@@ -113,7 +113,15 @@ class StoreIn(BaseModel):
     admin_whatsapp: Optional[str] = ""
     owner_user_id: Optional[str] = None
     admin_id: Optional[str] = None
+    group_ids: Optional[List[str]] = None
     featured: Optional[bool] = False
+
+
+class GroupIn(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    icon: Optional[str] = "pricetags"
+    color: Optional[str] = "#4A7C59"
 
 
 class SendWhatsApp(BaseModel):
@@ -454,11 +462,13 @@ async def rating_summary(store_id: str):
 
 
 @api.get("/stores")
-async def list_stores(viewer=Depends(optional_user)):
+async def list_stores(group_id: str = Query(""), viewer=Depends(optional_user)):
     q = {"deleted": {"$ne": True}, "active": {"$ne": False}}
     restrict = await scoped_store_ids_for_viewer(viewer)
     if restrict is not None:
         q["id"] = {"$in": restrict}
+    if group_id:
+        q["group_ids"] = group_id
     stores = await db.stores.find(q, {"_id": 0}).to_list(500)
     for s in stores:
         s["product_count"] = await db.products.count_documents({"store_id": s["id"], "deleted": {"$ne": True}})
@@ -1329,6 +1339,57 @@ async def search(q: str = Query(""), viewer=Depends(optional_user)):
     for p in products:
         p["store_name"] = smap.get(p["store_id"], "")
     return {"stores": stores, "products": products}
+
+
+# ------------------------------------------------------------------ Interest groups (áreas)
+DEFAULT_GROUPS = [
+    {"name": "Eletrônicos", "icon": "hardware-chip", "color": "#3A6EA5"},
+    {"name": "Moda & Acessórios", "icon": "shirt", "color": "#C16E53"},
+    {"name": "Beleza & Perfumaria", "icon": "sparkles", "color": "#B0568A"},
+    {"name": "Casa & Decoração", "icon": "home", "color": "#4A7C59"},
+    {"name": "Alimentos & Bebidas", "icon": "fast-food", "color": "#D48C46"},
+    {"name": "Serviços", "icon": "construct", "color": "#6B7A8F"},
+]
+
+
+async def seed_groups():
+    if await db.groups.count_documents({}) == 0:
+        for g in DEFAULT_GROUPS:
+            await db.groups.insert_one({"id": new_id("grp"), "name": g["name"], "description": "",
+                                        "icon": g["icon"], "color": g["color"], "created_at": now_iso()})
+
+
+@api.get("/groups")
+async def list_groups():
+    groups = await db.groups.find({}, {"_id": 0}).sort("name", 1).to_list(200)
+    for g in groups:
+        g["store_count"] = await db.stores.count_documents(
+            {"group_ids": g["id"], "deleted": {"$ne": True}, "active": {"$ne": False}})
+    return groups
+
+
+@api.post("/groups")
+async def create_group(body: GroupIn, user=Depends(require_role("admin"))):
+    doc = {"id": new_id("grp"), "name": body.name, "description": body.description or "",
+           "icon": body.icon or "pricetags", "color": body.color or "#4A7C59", "created_at": now_iso()}
+    await db.groups.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/groups/{group_id}")
+async def update_group(group_id: str, body: GroupIn, user=Depends(require_role("admin"))):
+    await db.groups.update_one({"id": group_id}, {"$set": {
+        "name": body.name, "description": body.description or "",
+        "icon": body.icon or "pricetags", "color": body.color or "#4A7C59"}})
+    return await db.groups.find_one({"id": group_id}, {"_id": 0})
+
+
+@api.delete("/groups/{group_id}")
+async def delete_group(group_id: str, user=Depends(require_role("admin"))):
+    await db.groups.delete_one({"id": group_id})
+    await db.stores.update_many({"group_ids": group_id}, {"$pull": {"group_ids": group_id}})
+    return {"ok": True}
 
 
 # ------------------------------------------------------------------ Invites (convite-only access)
@@ -2637,6 +2698,10 @@ async def startup():
         logger.info("storage initialized")
     except Exception as e:
         logger.warning(f"storage init failed: {e}")
+    try:
+        await seed_groups()
+    except Exception as e:
+        logger.warning(f"seed groups failed: {e}")
 
 
 @app.on_event("shutdown")

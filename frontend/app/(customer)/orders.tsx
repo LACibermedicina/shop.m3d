@@ -2,14 +2,18 @@ import { useState, useCallback } from "react";
 import { View, Text, StyleSheet, FlatList, Pressable, RefreshControl } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/api";
+import { useI18n } from "@/src/i18n";
+import { LangSelector } from "@/src/LangSelector";
 import { Loading, EmptyState, ErrorState, StatusBadge } from "@/src/ui";
-import { colors, spacing, radius, font, shadow, money } from "@/src/theme";
+import { colors, spacing, radius, font, shadow, money, gradients } from "@/src/theme";
 
 export default function CustomerOrders() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useI18n();
   const [orders, setOrders] = useState<any[]>([]);
   const [state, setState] = useState<"loading" | "error" | "done">("loading");
   const [refreshing, setRefreshing] = useState(false);
@@ -38,9 +42,12 @@ export default function CustomerOrders() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>Meus Pedidos</Text>
-      </View>
+      <LinearGradient colors={gradients.header} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.topBar}>
+          <LangSelector variant="light" />
+        </View>
+        <Text style={styles.title}>{t("Meus pedidos")}</Text>
+      </LinearGradient>
       {state === "loading" ? (
         <Loading />
       ) : state === "error" ? (
@@ -83,8 +90,15 @@ export default function CustomerOrders() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
-  header: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: font["2xl"], fontWeight: "800", color: colors.onSurface },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: radius.xl,
+    borderBottomRightRadius: radius.xl,
+    ...shadow.card,
+  },
+  topBar: { flexDirection: "row", justifyContent: "flex-end", marginBottom: spacing.sm },
+  title: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
   card: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.lg,

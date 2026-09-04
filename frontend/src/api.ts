@@ -170,6 +170,14 @@ export const api = {
   acceptInvite: (token: string) => apiRequest(`/invite/${token}/accept`, { method: "POST" }),
   catalogStores: () => apiRequest("/my/catalog-stores"),
 
+  // Interest groups (áreas)
+  groups: () => apiRequest("/groups"),
+  createGroup: (name: string, icon = "pricetags", color = "#4A7C59", description = "") =>
+    apiRequest("/groups", { method: "POST", body: { name, icon, color, description } }),
+  updateGroup: (id: string, name: string, icon: string, color: string) =>
+    apiRequest(`/groups/${id}`, { method: "PUT", body: { name, icon, color } }),
+  deleteGroup: (id: string) => apiRequest(`/groups/${id}`, { method: "DELETE" }),
+
   // Personal shopping catalog
   addCatalogItem: (storeId: string, productId: string, qty = 1, note = "") =>
     apiRequest("/catalog", { method: "POST", body: { store_id: storeId, product_id: productId, qty, note } }),
