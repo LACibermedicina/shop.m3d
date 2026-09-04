@@ -211,6 +211,11 @@ export default function AdminStores() {
           <Pressable testID="admin-invite-button" onPress={() => router.push("/invites")} style={styles.headerBadge}>
             <Ionicons name="person-add" size={20} color="#fff" />
           </Pressable>
+          {isMaster && (
+            <Pressable testID="admin-areas-button" onPress={() => router.push("/groups-admin")} style={styles.headerBadge}>
+              <Ionicons name="grid" size={20} color="#fff" />
+            </Pressable>
+          )}
         </View>
       </LinearGradient>
 

@@ -46,6 +46,7 @@ export default function StoreCatalog() {
   const { t } = useI18n();
   const [catalogCount, setCatalogCount] = useState(0);
   const [store, setStore] = useState<any>(null);
+  const [groups, setGroups] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [isFav, setIsFav] = useState(false);
@@ -60,16 +61,18 @@ export default function StoreCatalog() {
   const load = useCallback(
     async (s = sort, c = category) => {
       try {
-        const [st, pr, rv, favs] = await Promise.all([
+        const [st, pr, rv, favs, grps] = await Promise.all([
           api.store(id),
           api.products(id, s, c),
           api.reviews(id).catch(() => ({ reviews: [] })),
           api.favoriteIds().catch(() => []),
+          api.groups().catch(() => []),
         ]);
         setStore(st);
         setProducts(pr);
         setReviews(rv.reviews || []);
         setIsFav((favs || []).includes(id));
+        setGroups(grps || []);
         setState("done");
       } catch {
         setState("error");
@@ -253,6 +256,20 @@ export default function StoreCatalog() {
                     {store.description}
                   </Text>
                 )}
+                {(store?.group_ids || []).length > 0 && (
+                  <View style={styles.areaRow}>
+                    {(store.group_ids || []).map((gid: string) => {
+                      const g = groups.find((x) => x.id === gid);
+                      if (!g) return null;
+                      return (
+                        <View key={gid} style={[styles.areaBadge, { backgroundColor: (g.color || "#4A7C59") + "E6" }]}>
+                          <Ionicons name={g.icon || "pricetags"} size={11} color="#fff" />
+                          <Text style={styles.areaText}>{g.name}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
             </View>
             <ScrollView
@@ -378,6 +395,9 @@ const styles = StyleSheet.create({
   statusText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   heroName: { fontSize: font["2xl"], fontWeight: "800", color: "#fff" },
   heroDesc: { fontSize: font.base, color: "rgba(255,255,255,0.9)", marginTop: 4 },
+  areaRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.sm },
+  areaBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
+  areaText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   chipRow: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   sortRow: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   pCard: {

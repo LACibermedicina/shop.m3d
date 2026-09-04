@@ -39,6 +39,9 @@ export default function PersonalCatalog() {
   const [whats, setWhats] = useState("");
   const [notes, setNotes] = useState("");
   const [sending, setSending] = useState(false);
+  const [groups, setGroups] = useState<any[]>([]);
+  const [storeGroups, setStoreGroups] = useState<Record<string, string[]>>({});
+  const [areaFilter, setAreaFilter] = useState("");
 
   const load = useCallback(
     async (sf = storeFilter, cf = catFilter) => {
@@ -58,6 +61,15 @@ export default function PersonalCatalog() {
   useFocusEffect(
     useCallback(() => {
       load();
+      (async () => {
+        try {
+          const [grps, cstores] = await Promise.all([api.groups().catch(() => []), api.catalogStores().catch(() => [])]);
+          setGroups(grps || []);
+          const map: Record<string, string[]> = {};
+          (cstores || []).forEach((s: any) => { map[s.id] = s.group_ids || []; });
+          setStoreGroups(map);
+        } catch {}
+      })();
     }, [])
   );
 
