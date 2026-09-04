@@ -1,0 +1,38 @@
+{
+  "summary": "Validated the imported SHOP.M3D.pro app end-to-end. Backend: 23/23 pytest cases passed against the public preview URL (username+password login for all 4 seeded accounts root/@0root, admin/@0admin, lojista/@0lojista, cliente/@0cliente; /auth/me role verification; public endpoints /home, /stores, /whatsapp/status; admin flows /admin/metrics, /admin/users, /groups; vendor flow admin creates store -> lojista sees store_id in /auth/me -> creates product -> vendor/report returns daily/weekly/total/orders; customer flow /my/orders, /my/catalog-stores; RBAC 403 for cliente hitting admin). Frontend: mobile web preview loads /login, all 3 roles (root master, lojista, cliente) log in via testID selectors login-username/login-password/login-button and are redirected to their respective role dashboards (admin/vendor/customer tabs render correctly, no red screen, no page errors). No deprecated Expo packages detected (no expo-av/expo-barcode-scanner/expo-background-fetch).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/admin/users", "issue": "Returns empty list for non-master admin because it is scoped to lojistas of stores bound to that admin. Working as designed but seeded admin has no admin_store_ids so UI list will be empty until admin is bound to stores. Master (root) returns the full list correctly."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "react-native-web (framework-level)", "issue": "Console warnings: 'shadow*' style props are deprecated. Use 'boxShadow'. And props.pointerEvents is deprecated. Use style.pointerEvents. These come from RN Web core; low priority, non-blocking. Reference: any screen using shadow.* from src/theme."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_shopm3d_import.py",
+    "/app/test_reports/pytest/shopm3d_import.xml"
+  ],
+  "action_items": [
+    "None blocking. Optionally: migrate shadow.* tokens in /app/frontend/src/theme to boxShadow to silence RN Web deprecation warnings.",
+    "Optionally: document that /api/admin/users is scoped for non-master admins (or bind seeded admin to some stores) so the admin dashboard user list is non-empty."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 3018 lines — beyond the 700-line guideline; consider splitting into routers (auth, stores, products, orders, admin, whatsapp, etc.) for maintainability.",
+    "MongoDB _id is properly excluded via projection {\"_id\": 0} in all queried admin/user/store endpoints inspected."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_shopm3d_import.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Test-scoped store (TEST_ShopM3D_Store_*) and product created via lojista fixture; teardown attempts DELETE of both.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend URL: EXPO_PUBLIC_BACKEND_URL from /app/frontend/.env. Seeded accounts in /app/memory/test_credentials.md work. Reuse /app/backend/tests/test_shopm3d_import.py as regression. Login endpoint is POST /api/auth/login with body {username, password}; returns {session_token, user}. /api/auth/me requires Bearer session_token. Frontend uses testIDs login-username, login-password, login-button on /login. Role routing: master/admin -> /(admin), lojista -> /(vendor), cliente -> /(customer).",
+  "rca_of_issue": ""
+}
