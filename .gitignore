@@ -37,6 +37,10 @@ dist
 *.env.*
 !.env.example
 
+# Required by Emergent deployment build context (must be present):
+!backend/.env
+!frontend/.env
+
 *token.json*
 *credentials.json*
 

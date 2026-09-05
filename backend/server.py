@@ -37,7 +37,7 @@ EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 DEV_LOGIN_SECRET = os.environ.get("DEV_LOGIN_SECRET", "")
 ALLOW_DEV_LOGIN = os.environ.get("ALLOW_DEV_LOGIN", "").strip().lower() == "true"
 ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
-MASTER_EMAIL = os.environ.get("MASTER_EMAIL", "lucasmedicina86@gmail.com").strip().lower()
+MASTER_EMAIL = os.environ.get("MASTER_EMAIL", "").strip().lower()
 
 # WhatsApp Cloud API (optional — dormant until configured)
 WA_ACCESS_TOKEN = os.environ.get("WA_ACCESS_TOKEN", "").strip()
@@ -55,7 +55,7 @@ WA_TEMPLATE_STATUS = os.environ.get("WA_TEMPLATE_STATUS", "").strip()
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
 ONLINE_WINDOW = 60  # segundos sem heartbeat até a loja ser considerada offline
 ROOT_WHATSAPP = os.environ.get("ROOT_WHATSAPP", "").strip()
-EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+EMAIL_BASE_URL = os.environ.get("EMAIL_BASE_URL", "https://integrations.emergentagent.com")
 EMERGENT_EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
 EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Lojas da Fronteira")
 
