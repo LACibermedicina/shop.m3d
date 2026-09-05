@@ -261,22 +261,43 @@ export default function OrderDetail() {
         <View style={{ height: spacing.lg }} />
         {notifs.length > 0 && (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Avisos enviados</Text>
-            {notifs.map((n, i) => (
-              <View key={i} style={styles.notifRow} testID={`notif-${i}`}>
-                <Ionicons
-                  name={n.channel === "email" ? "mail-outline" : "logo-whatsapp"}
-                  size={16}
-                  color={n.channel === "email" ? colors.brandSecondary : "#25D366"}
-                />
-                <Text style={styles.notifText} numberOfLines={1}>
-                  {n.target} • {n.to || "—"}
-                </Text>
-                <Text style={[styles.notifStatus, { color: n.status === "sent" ? colors.success : n.status === "failed" ? colors.error : colors.warning }]}>
-                  {n.status === "sent" ? "enviado" : n.status === "failed" ? "falhou" : "simulado"}
-                </Text>
-              </View>
-            ))}
+            <Text style={styles.sectionTitle}>{t("Avisos enviados")}</Text>
+            {notifs.map((n, i) => {
+              const map: Record<string, { label: string; color: string }> = {
+                sent: { label: t("enviado"), color: colors.success },
+                template: { label: t("via modelo"), color: colors.success },
+                link: { label: t("enviar manual"), color: colors.warning },
+                simulated: { label: t("simulado"), color: colors.warning },
+                failed: { label: t("falhou"), color: colors.error },
+              };
+              const st = map[n.status] || map.simulated;
+              const pending = n.channel !== "email" && n.wa_link && n.status !== "sent" && n.status !== "template";
+              return (
+                <View key={i} style={styles.notifRow} testID={`notif-${i}`}>
+                  <Ionicons
+                    name={n.channel === "email" ? "mail-outline" : "logo-whatsapp"}
+                    size={16}
+                    color={n.channel === "email" ? colors.brandSecondary : "#25D366"}
+                  />
+                  <Text style={styles.notifText} numberOfLines={1}>
+                    {n.target} • {n.to || "—"}
+                  </Text>
+                  {pending ? (
+                    <Pressable
+                      testID={`notif-send-${i}`}
+                      onPress={() => openWa(n.wa_link)}
+                      style={styles.notifSendBtn}
+                      hitSlop={6}
+                    >
+                      <Ionicons name="logo-whatsapp" size={13} color="#fff" />
+                      <Text style={styles.notifSendText}>{t("Enviar")}</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={[styles.notifStatus, { color: st.color }]}>{st.label}</Text>
+                  )}
+                </View>
+              );
+            })}
           </View>
         )}
         {!!user && (
@@ -398,6 +419,16 @@ const styles = StyleSheet.create({
   notifRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.divider },
   notifText: { flex: 1, fontSize: font.sm, color: colors.onSurfaceTertiary },
   notifStatus: { fontSize: font.sm, fontWeight: "700" },
+  notifSendBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#25D366",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+  },
+  notifSendText: { color: "#fff", fontSize: font.sm, fontWeight: "800" },
   statusRow: { gap: spacing.sm, paddingBottom: spacing.md },
   statusChip: {
     height: 40,

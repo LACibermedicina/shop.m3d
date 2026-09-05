@@ -212,8 +212,8 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.6"
-  test_sequence: 6
+  version: "1.7"
+  test_sequence: 7
   run_ui: false
 
   - task: "Frontend: i18n (PT/EN/ES) + invite accept + personal catalog + multi-vendor send + invite mgmt"
@@ -268,6 +268,22 @@ test_plan:
   test_all: false
   test_priority: "high_first"
 
+backend_feature_log:
+  - task: "WhatsApp hybrid delivery + notification status (sent/template/link/simulated)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Hybrid plan C. _wa_or_sim now: (1) tries free-form text; (2) on failure tries approved utility template IF WA_TEMPLATE_ORDER/STATUS env set (currently EMPTY -> skipped); (3) safety-net records status 'link' with a wa.me deep-link so nothing is lost. _record stores wa_link. NOTE: the real WhatsApp number is currently platform_type=ON_PREMISE (SMB, DISCONNECTED) so Cloud API sends fail with #133010 -> every order notification is expected to fall back to status 'link' with a NON-EMPTY wa_link. Frontend order/[id] renders per-notification 'Enviar' button opening that wa.me link."
+        -working: true
+        -agent: "testing"
+        -comment: "PASSED: All 22 tests passed (100% success rate). Comprehensive WhatsApp hybrid delivery testing performed: (1) Master login successful ✓ (2) Store creation with WhatsApp number (5545999990001) ✓ (3) Product creation ✓ (4) Order creation with customer_whatsapp triggers notifications ✓ (5) GET /api/orders/{order_id}/notifications returns 3 notifications (lojista, admin, cliente) ✓ (6) All WhatsApp notifications have status='link' (NOT 'sent'/'template') as expected due to Cloud API #133010 error ✓ (7) All WhatsApp notifications have non-empty wa_link fields starting with 'https://wa.me/' ✓ (8) GET /api/orders/{order_id}/wa-links returns vendor_link and customer_link (both wa.me URLs) and pdf link ✓ (9) Regression: GET /api/whatsapp/status returns configured=true ✓ (10) Regression: GET /api/home, /api/stores, /api/groups all return 200 ✓ (11) Webhook verification: correct verify_token (shopm3d_wa_verify_2025_9f4c2a) returns challenge 'PING' ✓ (12) Webhook verification: wrong verify_token returns 403 ✓. The hybrid delivery fallback is working perfectly - when Cloud API send fails (error #133010 because number is in DISCONNECTED/ON_PREMISE state), the system correctly records status='link' with wa.me deep-link, ensuring no notification is lost. All WhatsApp hybrid delivery features working correctly."
+
 frontend_feature_log:
   - task: "Seletor de idioma por BANDEIRAS (PT-BR/EN/ES) + tradução IA na tela de login"
     implemented: true
@@ -303,3 +319,5 @@ agent_communication:
     -message: "ORDER EDITING REGRESSION TEST COMPLETE - ALL 15 tests PASSED (100% success rate). Comprehensive regression testing performed for order editing and client notifications: (1) Master creates store and product ✓ (2) Invite creation and acceptance ✓ (3) Cliente adds product to catalog ✓ (4) Order creation via catalog send ✓ (5) Master edits order (items, price, qty) - total correctly updated to 160 ✓ (6) Client notification recorded (channel=whatsapp, target=cliente) with 'ajustado' message ✓ (7) Permission check: other cliente cannot edit order (403) ✓ (8) Status change to 'pronto' sets editable=false ✓ (9) Master can view order (200) ✓ (10) Owner cliente can view order (200) ✓. All order editing features, notification recording, permission checks, and status management working correctly. No issues found."
     -agent: "testing"
     -message: "FRONTEND UI TESTING COMPLETE - CRITICAL BUG FOUND: Master auto-promotion NOT working in frontend. When logging in with lucasmedicina86@gmail.com as admin role, the UI shows 'Minhas lojas' (admin view) instead of 'Todas as lojas' (master view). No master-add-user button, no master role chips visible, no 'Painel master · gestão completa' subtitle. Backend correctly returns role=master, but frontend is not rendering master-specific UI. CLIENTE flow WORKS PERFECTLY: ✓ Customer home with language selector (PT/EN/ES), search bar ✓ Invite acceptance (/invite/d303b9bea81c428b971fd3113a75b834) ✓ Store page with products ✓ Add products to catalog ✓ Personal catalog with store badges, qty controls, PDF/Send buttons ✓ Language switching (Send button changes to 'Send' in English, 'Enviar' in Spanish) ✓ Catalog send creates order successfully ✓ Order appears in Pedidos tab. LOJISTA flow WORKS: ✓ Shows 'Nenhuma loja vinculada' correctly when no store assigned. The master UI rendering is the only critical issue."
+    -agent: "testing"
+    -message: "WHATSAPP HYBRID DELIVERY TESTING COMPLETE - ALL 22 tests PASSED (100% success rate). Comprehensive testing performed for WhatsApp hybrid delivery + notification status recording: ✓ Master login successful ✓ Store creation with WhatsApp number (5545999990001) ✓ Product creation ✓ Order creation with customer_whatsapp (5545988887777) triggers notifications ✓ GET /api/orders/{order_id}/notifications returns 3 notifications (lojista, admin, cliente) ✓ All WhatsApp notifications have status='link' (NOT 'sent'/'template') as expected due to Cloud API #133010 error ✓ All WhatsApp notifications have non-empty wa_link fields starting with 'https://wa.me/' ✓ GET /api/orders/{order_id}/wa-links returns vendor_link and customer_link (both wa.me URLs) and pdf link ✓ Regression: GET /api/whatsapp/status returns configured=true ✓ Regression: GET /api/home, /api/stores, /api/groups all return 200 ✓ Webhook verification: correct verify_token (shopm3d_wa_verify_2025_9f4c2a) returns challenge 'PING' ✓ Webhook verification: wrong verify_token returns 403 ✓. The hybrid delivery fallback is working perfectly - when Cloud API send fails (error #133010 because number is in DISCONNECTED/ON_PREMISE state), the system correctly records status='link' with wa.me deep-link, ensuring no notification is lost. All WhatsApp hybrid delivery features working correctly. No issues found."

@@ -46,6 +46,12 @@ WA_VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "").strip()
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
 WA_API_VERSION = os.environ.get("WA_API_VERSION", "v25.0").strip()
 WA_CONFIGURED = bool(WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID)
+# Utility templates (used for business-initiated notifications OUTSIDE the 24h window).
+# Leave empty until the templates are created & APPROVED on the WABA — when empty the
+# hybrid delivery skips the template step and falls back to a manual wa.me link.
+WA_TEMPLATE_LANG = os.environ.get("WA_TEMPLATE_LANG", "pt_BR").strip()
+WA_TEMPLATE_ORDER = os.environ.get("WA_TEMPLATE_ORDER", "").strip()
+WA_TEMPLATE_STATUS = os.environ.get("WA_TEMPLATE_STATUS", "").strip()
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
 ONLINE_WINDOW = 60  # segundos sem heartbeat até a loja ser considerada offline
 ROOT_WHATSAPP = os.environ.get("ROOT_WHATSAPP", "").strip()
@@ -1843,6 +1849,21 @@ async def wa_send(payload: dict):
     return r.json()
 
 
+def _wa_norm(number: str) -> str:
+    return re.sub(r"\D", "", number or "")
+
+
+async def wa_send_template(to: str, name: str, lang: str, body_params=None):
+    """Send an APPROVED utility template. body_params -> ordered list for {{1}},{{2}}..."""
+    template = {"name": name, "language": {"code": lang or WA_TEMPLATE_LANG or "pt_BR"}}
+    if body_params:
+        template["components"] = [{
+            "type": "body",
+            "parameters": [{"type": "text", "text": str(p)} for p in body_params],
+        }]
+    return await wa_send({"to": _wa_norm(to), "type": "template", "template": template})
+
+
 @api.post("/orders/send-whatsapp")
 async def send_order_whatsapp(body: SendWhatsApp, user=Depends(get_current_user)):
     if not WA_CONFIGURED:
@@ -3131,25 +3152,45 @@ def _order_link(o):
     return f"{base}/api/orders/{o['id']}/pdf?token={o['token']}" if base else ""
 
 
-async def _record(order_id, target, channel, to, body, status, subject="", store_id=""):
+async def _record(order_id, target, channel, to, body, status, subject="", store_id="", wa_link=""):
     await db.notifications.insert_one({
         "id": new_id("ntf"), "order_id": order_id, "store_id": store_id, "target": target,
         "channel": channel, "to": to, "subject": subject, "body": body, "status": status,
-        "created_at": now_iso(),
+        "wa_link": wa_link, "created_at": now_iso(),
     })
 
 
-async def _wa_or_sim(order_id, target, to, body, store_id=""):
+async def _wa_or_sim(order_id, target, to, body, store_id="", template=None):
+    """Hybrid WhatsApp delivery (approved plan C):
+    1) free-form text  -> works INSIDE the 24h customer-service window        [status=sent]
+    2) approved utility template -> works OUTSIDE the window (if configured)   [status=template]
+    3) manual wa.me link -> safety net so a notification is never lost         [status=link]
+    When WhatsApp isn't configured at all we still return an actionable link   [status=simulated].
+    """
     if not to:
         return
+    wa_link = _wa_me(to, body)
     if WA_CONFIGURED:
+        # 1) free-form session message
         try:
-            await wa_send({"to": to.replace(" ", "").replace("+", ""), "type": "text", "text": {"body": body}})
-            await _record(order_id, target, "whatsapp", to, body, "sent", store_id=store_id)
+            await wa_send({"to": _wa_norm(to), "type": "text", "text": {"body": body}})
+            await _record(order_id, target, "whatsapp", to, body, "sent", store_id=store_id, wa_link=wa_link)
             return
         except Exception as e:
-            logger.warning(f"WA notify failed: {e}")
-    await _record(order_id, target, "whatsapp", to, body, "simulated", store_id=store_id)
+            logger.warning(f"WA text failed ({target}): {e}")
+        # 2) approved utility template (business-initiated, out-of-window)
+        if template and template.get("name"):
+            try:
+                await wa_send_template(to, template["name"], template.get("lang", WA_TEMPLATE_LANG),
+                                       template.get("params"))
+                await _record(order_id, target, "whatsapp", to, body, "template",
+                              store_id=store_id, wa_link=wa_link)
+                return
+            except Exception as e:
+                logger.warning(f"WA template failed ({target}): {e}")
+    # 3) safety net: manual click-to-chat link (nothing is lost)
+    await _record(order_id, target, "whatsapp", to, body,
+                  "link" if wa_link else "simulated", store_id=store_id, wa_link=wa_link)
 
 
 async def notify_order(o, kind):
@@ -3165,11 +3206,23 @@ async def notify_order(o, kind):
         head = f"🔔 Pedido atualizado ({o.get('status','')}) — {o['store_name']}"
     base_body = (f"{head}\nCliente: {o.get('customer_name','')}\n{_order_lines(o)}\n"
                  f"Total: R$ {o['total']:.2f}{link_txt}")
+    # Template de utilidade (fallback fora da janela de 24h). Desativado enquanto o
+    # WA_TEMPLATE_* não estiver definido (aguarda criação/aprovação na Meta).
+    _cust = o.get("customer_name", "") or "cliente"
+    _total = f"R$ {o['total']:.2f}"
+    _link = link or "-"
+    tmpl_order = ({"name": WA_TEMPLATE_ORDER, "lang": WA_TEMPLATE_LANG,
+                   "params": [_cust, o["store_name"], _total, _link]}
+                  if WA_TEMPLATE_ORDER else None)
+    tmpl_status = ({"name": WA_TEMPLATE_STATUS, "lang": WA_TEMPLATE_LANG,
+                    "params": [_cust, o["store_name"], o.get("status", "atualizado"), _link]}
+                   if WA_TEMPLATE_STATUS else None)
+    tmpl = tmpl_order if kind in ("created", "edited") else tmpl_status
     # Lojista
-    await _wa_or_sim(o["id"], "lojista", store.get("whatsapp", ""), base_body, o["store_id"])
+    await _wa_or_sim(o["id"], "lojista", store.get("whatsapp", ""), base_body, o["store_id"], template=tmpl)
     # Administrador responsável (whatsapp da loja) ou root
     admin_to = store.get("admin_whatsapp") or ROOT_WHATSAPP
-    await _wa_or_sim(o["id"], "admin", admin_to, base_body, o["store_id"])
+    await _wa_or_sim(o["id"], "admin", admin_to, base_body, o["store_id"], template=tmpl)
     # Cliente: WhatsApp se houver, senão e-mail
     cust_wa = o.get("customer_whatsapp") or ""
     if kind == "created":
@@ -3184,7 +3237,7 @@ async def notify_order(o, kind):
         cust_body = (f"🔔 Seu pedido em {o['store_name']} agora está: {o.get('status','')}.{link_txt}")
         subj = f"Atualização do seu pedido ({o.get('status','')}) — Lojas da Fronteira"
     if cust_wa:
-        await _wa_or_sim(o["id"], "cliente", cust_wa, cust_body, o["store_id"])
+        await _wa_or_sim(o["id"], "cliente", cust_wa, cust_body, o["store_id"], template=tmpl)
     else:
         email = None
         u = await db.users.find_one({"user_id": o["customer_user_id"]}, {"_id": 0, "email": 1})

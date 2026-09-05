@@ -1,486 +1,389 @@
 #!/usr/bin/env python3
 """
-Backend API Tests for Password Authentication
-Tests the new password login feature and existing public endpoints.
+Backend test for WhatsApp hybrid delivery + notification status recording
+Tests the fallback behavior when WhatsApp Cloud API fails with error #133010
 """
 import requests
+import json
 import sys
-import os
+from typing import Dict, Any, Optional
 
-# Backend base URL from frontend/.env
-BASE_URL = "https://git-sync-40.preview.emergentagent.com/api"
+# Backend URL from frontend/.env
+BASE_URL = "https://f7497c82-899f-4f48-913d-9bb1aa940d02.preview.emergentagent.com/api"
 
 # Test credentials from /app/memory/test_credentials.md
 CREDENTIALS = {
-    "root": {
-        "username": "root",
-        "email": "root@m3d.pro",
-        "password": "@0root",
-        "role": "master",
-        "whatsapp": "5511920946954"
-    },
-    "admin": {
-        "username": "admin",
-        "email": "admin@m3d.pro",
-        "password": "@0admin",
-        "role": "admin",
-        "whatsapp": "5511960708817"
-    },
-    "lojista": {
-        "username": "lojista",
-        "email": "lojista@m3d.pro",
-        "password": "@0lojista",
-        "role": "lojista",
-        "whatsapp": "5511960708817"
-    },
-    "cliente": {
-        "username": "cliente",
-        "email": "cliente@m3d.pro",
-        "password": "@0cliente",
-        "role": "cliente",
-        "whatsapp": "5511960708817"
-    }
+    "master": {"username": "root", "password": "@0root"},
+    "admin": {"username": "admin", "password": "@0admin"},
+    "lojista": {"username": "lojista", "password": "@0lojista"},
+    "cliente": {"username": "cliente", "password": "@0cliente"},
 }
 
-class Colors:
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    END = '\033[0m'
-
-def log_test(name, passed, details=""):
-    status = f"{Colors.GREEN}✓ PASS{Colors.END}" if passed else f"{Colors.RED}✗ FAIL{Colors.END}"
-    print(f"{status} | {name}")
-    if details:
-        print(f"       {details}")
-    return passed
-
-def test_login_by_username(account_name):
-    """Test 1: Login with username for all 4 accounts"""
-    cred = CREDENTIALS[account_name]
-    resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": cred["username"],
-        "password": cred["password"]
-    }, timeout=10)
-    
-    if resp.status_code != 200:
-        return log_test(
-            f"Login {account_name} by username",
-            False,
-            f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
-        )
-    
-    data = resp.json()
-    
-    # Check session_token exists
-    if "session_token" not in data:
-        return log_test(
-            f"Login {account_name} by username",
-            False,
-            "Missing session_token in response"
-        )
-    
-    # Check user object
-    if "user" not in data:
-        return log_test(
-            f"Login {account_name} by username",
-            False,
-            "Missing user object in response"
-        )
-    
-    user = data["user"]
-    
-    # Check role
-    if user.get("role") != cred["role"]:
-        return log_test(
-            f"Login {account_name} by username",
-            False,
-            f"Expected role={cred['role']}, got {user.get('role')}"
-        )
-    
-    # Check whatsapp
-    if user.get("whatsapp") != cred["whatsapp"]:
-        return log_test(
-            f"Login {account_name} by username",
-            False,
-            f"Expected whatsapp={cred['whatsapp']}, got {user.get('whatsapp')}"
-        )
-    
-    # Check password_hash is NOT in response
-    if "password_hash" in user:
-        return log_test(
-            f"Login {account_name} by username",
-            False,
-            "SECURITY: password_hash leaked in response!"
-        )
-    
-    return log_test(
-        f"Login {account_name} by username",
-        True,
-        f"role={user['role']}, whatsapp={user['whatsapp']}, token={data['session_token'][:20]}..."
-    ), data["session_token"]
-
-def test_login_by_email(account_name):
-    """Test 3: Login with email"""
-    cred = CREDENTIALS[account_name]
-    resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": cred["email"],  # email in username field
-        "password": cred["password"]
-    }, timeout=10)
-    
-    if resp.status_code != 200:
-        return log_test(
-            f"Login {account_name} by email",
-            False,
-            f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
-        )
-    
-    data = resp.json()
-    user = data.get("user", {})
-    
-    # Check role
-    if user.get("role") != cred["role"]:
-        return log_test(
-            f"Login {account_name} by email",
-            False,
-            f"Expected role={cred['role']}, got {user.get('role')}"
-        )
-    
-    # Check password_hash is NOT in response
-    if "password_hash" in user:
-        return log_test(
-            f"Login {account_name} by email",
-            False,
-            "SECURITY: password_hash leaked in response!"
-        )
-    
-    return log_test(
-        f"Login {account_name} by email",
-        True,
-        f"role={user['role']}"
-    ), data["session_token"]
-
-def test_wrong_password():
-    """Test 4: Wrong password returns 401"""
-    resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": "cliente",
-        "password": "wrongpassword"
-    }, timeout=10)
-    
-    return log_test(
-        "Wrong password returns 401",
-        resp.status_code == 401,
-        f"Got status {resp.status_code}"
-    )
-
-def test_unknown_user():
-    """Test 4: Unknown user returns 401"""
-    resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": "nonexistent_user_12345",
-        "password": "anypassword"
-    }, timeout=10)
-    
-    return log_test(
-        "Unknown user returns 401",
-        resp.status_code == 401,
-        f"Got status {resp.status_code}"
-    )
-
-def test_missing_fields():
-    """Test 4: Missing fields returns 400"""
-    # Missing password
-    resp1 = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": "cliente"
-    }, timeout=10)
-    
-    # Missing username
-    resp2 = requests.post(f"{BASE_URL}/auth/login", json={
-        "password": "test"
-    }, timeout=10)
-    
-    # Empty username
-    resp3 = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": "",
-        "password": "test"
-    }, timeout=10)
-    
-    passed = resp1.status_code == 400 and resp2.status_code == 400 and resp3.status_code == 400
-    
-    return log_test(
-        "Missing fields returns 400",
-        passed,
-        f"Missing password: {resp1.status_code}, Missing username: {resp2.status_code}, Empty username: {resp3.status_code}"
-    )
-
-def test_auth_me(token):
-    """Test 5: GET /api/auth/me with token"""
-    resp = requests.get(f"{BASE_URL}/auth/me", headers={
-        "Authorization": f"Bearer {token}"
-    }, timeout=10)
-    
-    if resp.status_code != 200:
-        return log_test(
-            "GET /api/auth/me with token",
-            False,
-            f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
-        )
-    
-    user = resp.json()
-    
-    # Check password_hash is NOT in response
-    if "password_hash" in user:
-        return log_test(
-            "GET /api/auth/me with token",
-            False,
-            "SECURITY: password_hash leaked in /auth/me response!"
-        )
-    
-    return log_test(
-        "GET /api/auth/me with token",
-        True,
-        f"role={user.get('role')}, email={user.get('email')}"
-    )
-
-def test_master_overview(master_token):
-    """Test 6: Master can access /api/master/overview"""
-    resp = requests.get(f"{BASE_URL}/master/overview", headers={
-        "Authorization": f"Bearer {master_token}"
-    }, timeout=10)
-    
-    if resp.status_code != 200:
-        return log_test(
-            "Master access to /api/master/overview",
-            False,
-            f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
-        )
-    
-    data = resp.json()
-    
-    # Check response structure
-    if "users" not in data or "stores" not in data or "counts" not in data:
-        return log_test(
-            "Master access to /api/master/overview",
-            False,
-            f"Missing expected fields in response: {list(data.keys())}"
-        )
-    
-    return log_test(
-        "Master access to /api/master/overview",
-        True,
-        f"users={len(data['users'])}, stores={len(data['stores'])}, counts={data['counts']}"
-    )
-
-def test_cliente_cannot_access_master(cliente_token):
-    """Test 6: Cliente cannot access master endpoints (403)"""
-    resp = requests.get(f"{BASE_URL}/master/overview", headers={
-        "Authorization": f"Bearer {cliente_token}"
-    }, timeout=10)
-    
-    return log_test(
-        "Cliente cannot access /api/master/overview (403)",
-        resp.status_code == 403,
-        f"Got status {resp.status_code}"
-    )
-
-def test_dev_login_disabled():
-    """Test 7: Dev-login is disabled (403)"""
-    resp = requests.post(f"{BASE_URL}/auth/dev-login", json={
-        "email": "test@example.com",
-        "role": "cliente"
-    }, timeout=10)
-    
-    return log_test(
-        "Dev-login disabled (403)",
-        resp.status_code == 403,
-        f"Got status {resp.status_code}"
-    )
-
-def test_public_endpoint(endpoint_name, endpoint_path):
-    """Test 8: Public endpoints still work"""
-    resp = requests.get(f"{BASE_URL}{endpoint_path}", timeout=10)
-    
-    return log_test(
-        f"Public endpoint {endpoint_name}",
-        resp.status_code == 200,
-        f"Got status {resp.status_code}"
-    )
-
-def test_seed_idempotency():
-    """Test 9: Seed is idempotent - login again still works"""
-    # Login root again
-    resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": "root",
-        "password": "@0root"
-    }, timeout=10)
-    
-    if resp.status_code != 200:
-        return log_test(
-            "Seed idempotency (login root again)",
-            False,
-            f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
-        )
-    
-    data = resp.json()
-    user = data.get("user", {})
-    
-    # Verify still master
-    if user.get("role") != "master":
-        return log_test(
-            "Seed idempotency (login root again)",
-            False,
-            f"Expected role=master, got {user.get('role')}"
-        )
-    
-    return log_test(
-        "Seed idempotency (login root again)",
-        True,
-        "Root still logs in as master"
-    )
-
-def main():
-    print(f"\n{Colors.BLUE}{'='*70}{Colors.END}")
-    print(f"{Colors.BLUE}Backend API Tests - Password Authentication{Colors.END}")
-    print(f"{Colors.BLUE}Base URL: {BASE_URL}{Colors.END}")
-    print(f"{Colors.BLUE}{'='*70}{Colors.END}\n")
-    
-    passed = 0
-    failed = 0
-    tokens = {}
-    
-    # Test 1 & 2: Login all 4 accounts by username
-    print(f"\n{Colors.YELLOW}Test Group 1 & 2: Login by username (all 4 accounts){Colors.END}")
-    for account in ["root", "admin", "lojista", "cliente"]:
-        result = test_login_by_username(account)
-        if isinstance(result, tuple):
-            success, token = result
-            if success:
-                passed += 1
-                tokens[account] = token
+class TestRunner:
+    def __init__(self):
+        self.passed = 0
+        self.failed = 0
+        self.tokens = {}
+        self.test_data = {}
+        
+    def log(self, msg: str, level: str = "INFO"):
+        prefix = {
+            "INFO": "ℹ️",
+            "PASS": "✅",
+            "FAIL": "❌",
+            "WARN": "⚠️",
+        }.get(level, "•")
+        print(f"{prefix} {msg}")
+        
+    def login(self, role: str) -> Optional[str]:
+        """Login and return token"""
+        creds = CREDENTIALS.get(role)
+        if not creds:
+            self.log(f"No credentials for role {role}", "FAIL")
+            return None
+            
+        try:
+            resp = requests.post(
+                f"{BASE_URL}/auth/login",
+                json=creds,
+                timeout=10
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                token = data.get("session_token")
+                self.tokens[role] = token
+                self.log(f"Login {role} successful (role={data.get('role')})", "PASS")
+                return token
             else:
-                failed += 1
-        else:
-            if result:
-                passed += 1
+                self.log(f"Login {role} failed: {resp.status_code} {resp.text}", "FAIL")
+                return None
+        except Exception as e:
+            self.log(f"Login {role} exception: {e}", "FAIL")
+            return None
+            
+    def api_call(self, method: str, endpoint: str, token: Optional[str] = None, 
+                 json_data: Optional[Dict] = None, params: Optional[Dict] = None) -> tuple:
+        """Make API call and return (status_code, response_data)"""
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            
+        url = f"{BASE_URL}{endpoint}"
+        try:
+            if method == "GET":
+                resp = requests.get(url, headers=headers, params=params, timeout=15)
+            elif method == "POST":
+                resp = requests.post(url, headers=headers, json=json_data, timeout=15)
+            elif method == "PUT":
+                resp = requests.put(url, headers=headers, json=json_data, timeout=15)
+            elif method == "DELETE":
+                resp = requests.delete(url, headers=headers, timeout=15)
             else:
-                failed += 1
-    
-    # Test 3: Login by email
-    print(f"\n{Colors.YELLOW}Test Group 3: Login by email{Colors.END}")
-    result = test_login_by_email("root")
-    if isinstance(result, tuple):
-        success, token = result
-        if success:
-            passed += 1
-            if "root" not in tokens:
-                tokens["root"] = token
+                return (0, {"error": f"Unknown method {method}"})
+                
+            try:
+                data = resp.json()
+            except:
+                data = {"text": resp.text}
+            return (resp.status_code, data)
+        except Exception as e:
+            return (0, {"error": str(e)})
+            
+    def assert_equal(self, actual, expected, msg: str):
+        """Assert equality"""
+        if actual == expected:
+            self.passed += 1
+            self.log(f"{msg}: {actual} == {expected}", "PASS")
+            return True
         else:
-            failed += 1
-    else:
-        if result:
-            passed += 1
+            self.failed += 1
+            self.log(f"{msg}: {actual} != {expected}", "FAIL")
+            return False
+            
+    def assert_true(self, condition, msg: str):
+        """Assert true"""
+        if condition:
+            self.passed += 1
+            self.log(f"{msg}", "PASS")
+            return True
         else:
-            failed += 1
-    
-    # Test 4: Error cases
-    print(f"\n{Colors.YELLOW}Test Group 4: Error handling{Colors.END}")
-    if test_wrong_password():
-        passed += 1
-    else:
-        failed += 1
-    
-    if test_unknown_user():
-        passed += 1
-    else:
-        failed += 1
-    
-    if test_missing_fields():
-        passed += 1
-    else:
-        failed += 1
-    
-    # Test 5: /auth/me
-    print(f"\n{Colors.YELLOW}Test Group 5: Token usage on /api/auth/me{Colors.END}")
-    if "root" in tokens:
-        if test_auth_me(tokens["root"]):
-            passed += 1
+            self.failed += 1
+            self.log(f"{msg} - FAILED", "FAIL")
+            return False
+            
+    def assert_in(self, item, container, msg: str):
+        """Assert item in container"""
+        if item in container:
+            self.passed += 1
+            self.log(f"{msg}: '{item}' found", "PASS")
+            return True
         else:
-            failed += 1
-    else:
-        log_test("GET /api/auth/me with token", False, "No root token available")
-        failed += 1
-    
-    # Test 6: Master access and cliente restriction
-    print(f"\n{Colors.YELLOW}Test Group 6: Role-based access control{Colors.END}")
-    if "root" in tokens:
-        if test_master_overview(tokens["root"]):
-            passed += 1
+            self.failed += 1
+            self.log(f"{msg}: '{item}' NOT found in {container}", "FAIL")
+            return False
+            
+    def test_whatsapp_hybrid_delivery(self):
+        """
+        Test WhatsApp hybrid delivery + notification status recording
+        Expected: status='link' with non-empty wa_link (because Cloud API fails with #133010)
+        """
+        self.log("=" * 80)
+        self.log("TEST: WhatsApp Hybrid Delivery + Notification Status Recording")
+        self.log("=" * 80)
+        
+        # Step 1: Login as master
+        self.log("\n[Step 1] Login as master (root)")
+        master_token = self.login("master")
+        if not master_token:
+            self.log("Cannot proceed without master token", "FAIL")
+            return
+            
+        # Step 2: Create a store with whatsapp number
+        self.log("\n[Step 2] Create store with WhatsApp number")
+        store_data = {
+            "name": "Loja WA Test",
+            "whatsapp": "5545999990001",
+            "category": "Geral",
+            "description": "Test store for WhatsApp notifications"
+        }
+        status, resp = self.api_call("POST", "/stores", master_token, store_data)
+        if status == 200:
+            store_id = resp.get("id")
+            self.test_data["store_id"] = store_id
+            self.log(f"Store created: {store_id}", "PASS")
         else:
-            failed += 1
-    else:
-        log_test("Master access to /api/master/overview", False, "No root token available")
-        failed += 1
-    
-    if "cliente" in tokens:
-        if test_cliente_cannot_access_master(tokens["cliente"]):
-            passed += 1
+            self.log(f"Store creation failed: {status} {resp}", "FAIL")
+            self.failed += 1
+            return
+            
+        # Step 3: Create a product
+        self.log("\n[Step 3] Create product for the store")
+        product_data = {
+            "store_id": store_id,
+            "name": "Produto WA",
+            "price": 50.0,
+            "category": "Teste",
+            "description": "Test product"
+        }
+        status, resp = self.api_call("POST", "/products", master_token, product_data)
+        if status == 200:
+            product_id = resp.get("id")
+            self.test_data["product_id"] = product_id
+            self.log(f"Product created: {product_id}", "PASS")
         else:
-            failed += 1
-    else:
-        log_test("Cliente cannot access /api/master/overview (403)", False, "No cliente token available")
-        failed += 1
-    
-    # Test 7: Dev-login disabled
-    print(f"\n{Colors.YELLOW}Test Group 7: Dev-login disabled{Colors.END}")
-    if test_dev_login_disabled():
-        passed += 1
-    else:
-        failed += 1
-    
-    # Test 8: Public endpoints
-    print(f"\n{Colors.YELLOW}Test Group 8: Public endpoints{Colors.END}")
-    public_endpoints = [
-        ("GET /api/home", "/home"),
-        ("GET /api/stores", "/stores"),
-        ("GET /api/groups", "/groups"),
-        ("GET /api/whatsapp/status", "/whatsapp/status")
-    ]
-    
-    for name, path in public_endpoints:
-        if test_public_endpoint(name, path):
-            passed += 1
+            self.log(f"Product creation failed: {status} {resp}", "FAIL")
+            self.failed += 1
+            return
+            
+        # Step 4: Create an order with customer_whatsapp to trigger notifications
+        self.log("\n[Step 4] Create order with customer_whatsapp to trigger notifications")
+        order_data = {
+            "store_id": store_id,
+            "items": [
+                {
+                    "product_id": product_id,
+                    "name": "Produto WA",
+                    "price": 50.0,
+                    "qty": 2
+                }
+            ],
+            "customer_name": "Cliente Teste WA",
+            "customer_whatsapp": "5545988887777",
+            "notes": "Test order for WhatsApp hybrid delivery"
+        }
+        status, resp = self.api_call("POST", "/orders", master_token, order_data)
+        if status == 200:
+            order_id = resp.get("id")
+            order_token = resp.get("token")
+            self.test_data["order_id"] = order_id
+            self.test_data["order_token"] = order_token
+            self.log(f"Order created: {order_id}, token: {order_token}", "PASS")
+            self.log(f"Order total: R$ {resp.get('total')}", "INFO")
         else:
-            failed += 1
-    
-    # Test 9: Seed idempotency
-    print(f"\n{Colors.YELLOW}Test Group 9: Seed idempotency{Colors.END}")
-    if test_seed_idempotency():
-        passed += 1
-    else:
-        failed += 1
-    
-    # Summary
-    total = passed + failed
-    print(f"\n{Colors.BLUE}{'='*70}{Colors.END}")
-    print(f"{Colors.BLUE}Test Summary{Colors.END}")
-    print(f"{Colors.BLUE}{'='*70}{Colors.END}")
-    print(f"Total: {total} | {Colors.GREEN}Passed: {passed}{Colors.END} | {Colors.RED}Failed: {failed}{Colors.END}")
-    
-    if failed == 0:
-        print(f"\n{Colors.GREEN}✓ All tests passed!{Colors.END}\n")
-        return 0
-    else:
-        print(f"\n{Colors.RED}✗ {failed} test(s) failed{Colors.END}\n")
-        return 1
+            self.log(f"Order creation failed: {status} {resp}", "FAIL")
+            self.failed += 1
+            return
+            
+        # Step 5: GET /api/orders/{order_id}/notifications
+        self.log("\n[Step 5] GET /api/orders/{order_id}/notifications")
+        status, notifications = self.api_call("GET", f"/orders/{order_id}/notifications", master_token)
+        
+        if status != 200:
+            self.log(f"Failed to get notifications: {status} {notifications}", "FAIL")
+            self.failed += 1
+            return
+            
+        self.log(f"Retrieved {len(notifications)} notifications", "INFO")
+        
+        # Analyze notifications
+        self.log("\n[Step 5a] Analyze notification records")
+        targets_found = set()
+        whatsapp_notifications = []
+        
+        for notif in notifications:
+            target = notif.get("target")
+            channel = notif.get("channel")
+            status_val = notif.get("status")
+            wa_link = notif.get("wa_link", "")
+            to = notif.get("to", "")
+            
+            targets_found.add(target)
+            
+            self.log(f"  Notification: target={target}, channel={channel}, status={status_val}, "
+                    f"to={to}, wa_link={'YES' if wa_link else 'NO'}", "INFO")
+            
+            if channel == "whatsapp":
+                whatsapp_notifications.append(notif)
+                
+        # Assert: There should be notifications for lojista, admin, and cliente
+        self.log("\n[Step 5b] Verify notification targets")
+        self.assert_in("lojista", targets_found, "Notification for 'lojista' exists")
+        self.assert_in("admin", targets_found, "Notification for 'admin' exists")
+        self.assert_in("cliente", targets_found, "Notification for 'cliente' exists")
+        
+        # Assert: For WhatsApp notifications, status should be "link" (NOT "sent"/"template")
+        self.log("\n[Step 5c] Verify WhatsApp notification status and wa_link")
+        for notif in whatsapp_notifications:
+            target = notif.get("target")
+            status_val = notif.get("status")
+            wa_link = notif.get("wa_link", "")
+            
+            # Status should be "link" because Cloud API fails with #133010
+            self.assert_equal(status_val, "link", 
+                            f"WhatsApp notification for '{target}' has status='link'")
+            
+            # wa_link must be non-empty and start with https://wa.me/
+            self.assert_true(bool(wa_link), 
+                           f"WhatsApp notification for '{target}' has non-empty wa_link")
+            self.assert_true(wa_link.startswith("https://wa.me/"), 
+                           f"WhatsApp notification for '{target}' wa_link starts with 'https://wa.me/'")
+            
+            if wa_link:
+                self.log(f"  wa_link for {target}: {wa_link[:80]}...", "INFO")
+                
+        # Step 6: GET /api/orders/{order_id}/wa-links
+        self.log("\n[Step 6] GET /api/orders/{order_id}/wa-links")
+        status, wa_links = self.api_call("GET", f"/orders/{order_id}/wa-links", master_token)
+        
+        if status == 200:
+            vendor_link = wa_links.get("vendor_link", "")
+            customer_link = wa_links.get("customer_link", "")
+            pdf = wa_links.get("pdf", "")
+            
+            self.assert_true(bool(vendor_link), "vendor_link is non-empty")
+            self.assert_true(vendor_link.startswith("https://wa.me/"), 
+                           "vendor_link starts with 'https://wa.me/'")
+            
+            self.assert_true(bool(customer_link), "customer_link is non-empty")
+            self.assert_true(customer_link.startswith("https://wa.me/"), 
+                           "customer_link starts with 'https://wa.me/'")
+            
+            self.log(f"  vendor_link: {vendor_link[:80]}...", "INFO")
+            self.log(f"  customer_link: {customer_link[:80]}...", "INFO")
+            if pdf:
+                self.log(f"  pdf: {pdf}", "INFO")
+        else:
+            self.log(f"Failed to get wa-links: {status} {wa_links}", "FAIL")
+            self.failed += 1
+            
+    def test_regression_endpoints(self):
+        """Test regression: confirm existing endpoints still work"""
+        self.log("\n" + "=" * 80)
+        self.log("TEST: Regression - Existing Endpoints")
+        self.log("=" * 80)
+        
+        # GET /api/whatsapp/status
+        self.log("\n[Regression 1] GET /api/whatsapp/status")
+        status, resp = self.api_call("GET", "/whatsapp/status")
+        if status == 200:
+            configured = resp.get("configured")
+            self.assert_equal(configured, True, "WhatsApp configured=true")
+        else:
+            self.log(f"GET /api/whatsapp/status failed: {status} {resp}", "FAIL")
+            self.failed += 1
+            
+        # GET /api/home
+        self.log("\n[Regression 2] GET /api/home")
+        status, resp = self.api_call("GET", "/home")
+        self.assert_equal(status, 200, "GET /api/home returns 200")
+        
+        # GET /api/stores
+        self.log("\n[Regression 3] GET /api/stores")
+        status, resp = self.api_call("GET", "/stores")
+        self.assert_equal(status, 200, "GET /api/stores returns 200")
+        
+        # GET /api/groups
+        self.log("\n[Regression 4] GET /api/groups")
+        status, resp = self.api_call("GET", "/groups")
+        self.assert_equal(status, 200, "GET /api/groups returns 200")
+        
+    def test_webhook_verification(self):
+        """Test webhook verification endpoint"""
+        self.log("\n" + "=" * 80)
+        self.log("TEST: Webhook Verification")
+        self.log("=" * 80)
+        
+        # Correct verify_token
+        self.log("\n[Webhook 1] GET /api/webhooks/whatsapp with CORRECT verify_token")
+        params = {
+            "hub.mode": "subscribe",
+            "hub.verify_token": "shopm3d_wa_verify_2025_9f4c2a",
+            "hub.challenge": "PING"
+        }
+        status, resp = self.api_call("GET", "/webhooks/whatsapp", params=params)
+        if status == 200:
+            # Response should be the challenge value
+            challenge_returned = resp if isinstance(resp, str) else resp.get("text", "")
+            self.assert_true("PING" in str(challenge_returned), 
+                           "Webhook returns challenge 'PING' on correct verify_token")
+        else:
+            self.log(f"Webhook verification failed: {status} {resp}", "FAIL")
+            self.failed += 1
+            
+        # Wrong verify_token
+        self.log("\n[Webhook 2] GET /api/webhooks/whatsapp with WRONG verify_token")
+        params = {
+            "hub.mode": "subscribe",
+            "hub.verify_token": "wrong_token",
+            "hub.challenge": "PING"
+        }
+        status, resp = self.api_call("GET", "/webhooks/whatsapp", params=params)
+        self.assert_equal(status, 403, "Webhook returns 403 on wrong verify_token")
+        
+    def run_all_tests(self):
+        """Run all tests"""
+        self.log("Starting WhatsApp Hybrid Delivery Backend Tests")
+        self.log(f"Backend URL: {BASE_URL}")
+        self.log("")
+        
+        try:
+            self.test_whatsapp_hybrid_delivery()
+            self.test_regression_endpoints()
+            self.test_webhook_verification()
+        except Exception as e:
+            self.log(f"Test suite exception: {e}", "FAIL")
+            import traceback
+            traceback.print_exc()
+            
+        # Summary
+        self.log("\n" + "=" * 80)
+        self.log("TEST SUMMARY")
+        self.log("=" * 80)
+        total = self.passed + self.failed
+        pass_rate = (self.passed / total * 100) if total > 0 else 0
+        self.log(f"Total tests: {total}")
+        self.log(f"Passed: {self.passed} ✅")
+        self.log(f"Failed: {self.failed} ❌")
+        self.log(f"Pass rate: {pass_rate:.1f}%")
+        
+        if self.failed == 0:
+            self.log("\n🎉 ALL TESTS PASSED!", "PASS")
+            return 0
+        else:
+            self.log(f"\n⚠️  {self.failed} TEST(S) FAILED", "FAIL")
+            return 1
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}Tests interrupted by user{Colors.END}\n")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n{Colors.RED}Fatal error: {e}{Colors.END}\n")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    runner = TestRunner()
+    exit_code = runner.run_all_tests()
+    sys.exit(exit_code)
