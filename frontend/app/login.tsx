@@ -17,6 +17,8 @@ import { useAuth } from "@/src/auth";
 import { Button, Field, useToast } from "@/src/ui";
 import { colors, spacing, radius, font, shadow, glass } from "@/src/theme";
 import { HERO_IMAGE } from "@/src/images";
+import { LangSelector } from "@/src/LangSelector";
+import { useI18n } from "@/src/i18n";
 
 const HERO = HERO_IMAGE;
 
@@ -24,6 +26,7 @@ export default function Login() {
   const { user, login } = useAuth();
   const router = useRouter();
   const toast = useToast();
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [username, setUsername] = useState("");
@@ -36,14 +39,14 @@ export default function Login() {
 
   const handleLogin = async () => {
     if (!username.trim() || !password) {
-      toast("Informe usuário e senha", "info");
+      toast(t("Informe usuário e senha"), "info");
       return;
     }
     setBusy(true);
     try {
       await login(username.trim(), password);
     } catch (e: any) {
-      toast(e.message || "Falha no login", "error");
+      toast(e.message || t("Falha no login"), "error");
     } finally {
       setBusy(false);
     }
@@ -59,6 +62,11 @@ export default function Login() {
         style={StyleSheet.absoluteFill}
       />
 
+      {/* Seletor de idioma (bandeiras) — tradução da aplicação por IA */}
+      <View style={[styles.langBar, { top: insets.top + spacing.sm }]} pointerEvents="box-none">
+        <LangSelector variant="light" />
+      </View>
+
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.flex}
@@ -66,7 +74,7 @@ export default function Login() {
         <ScrollView
           contentContainerStyle={[
             styles.scroll,
-            { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.xl },
+            { paddingTop: insets.top + spacing.xl * 2.5, paddingBottom: insets.bottom + spacing.xl },
           ]}
           keyboardShouldPersistTaps="handled"
         >
@@ -79,23 +87,23 @@ export default function Login() {
             />
             <Text style={styles.brandTop}>shop.m3d.pro</Text>
             <Text style={styles.tagline}>
-              Lojas por áreas de interesse. Compre de quem entende, numa rede de confiança.
+              {t("Lojas por áreas de interesse. Compre de quem entende, numa rede de confiança.")}
             </Text>
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Entrar</Text>
-            <Text style={styles.cardSub}>Acesse com seu usuário e senha</Text>
+            <Text style={styles.cardTitle}>{t("Entrar")}</Text>
+            <Text style={styles.cardSub}>{t("Acesse com seu usuário e senha")}</Text>
 
             <View style={styles.inputWrap}>
               <Ionicons name="person-outline" size={18} color={colors.brandPrimary} style={styles.inputIcon} />
               <View style={{ flex: 1 }}>
                 <Field
                   testID="login-username"
-                  label="Usuário"
+                  label={t("Usuário")}
                   value={username}
                   onChangeText={setUsername}
-                  placeholder="root, admin, lojista ou cliente"
+                  placeholder={t("root, admin, lojista ou cliente")}
                   autoCapitalize="none"
                 />
               </View>
@@ -106,10 +114,10 @@ export default function Login() {
               <View style={{ flex: 1 }}>
                 <Field
                   testID="login-password"
-                  label="Senha"
+                  label={t("Senha")}
                   value={password}
                   onChangeText={setPassword}
-                  placeholder="Sua senha"
+                  placeholder={t("Sua senha")}
                   autoCapitalize="none"
                   secureTextEntry={!showPass}
                   returnKeyType="go"
@@ -131,7 +139,7 @@ export default function Login() {
             </View>
 
             <Button
-              title="Entrar"
+              title={t("Entrar")}
               onPress={handleLogin}
               loading={busy}
               testID="login-button"
@@ -140,7 +148,7 @@ export default function Login() {
 
             <View style={styles.footerRow}>
               <Ionicons name="shield-checkmark-outline" size={14} color={colors.muted} />
-              <Text style={styles.footerText}>Acesso seguro · rede de confiança m3d.pro</Text>
+              <Text style={styles.footerText}>{t("Acesso seguro · rede de confiança m3d.pro")}</Text>
             </View>
           </View>
         </ScrollView>
@@ -153,6 +161,11 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { flex: 1, backgroundColor: "#0A130F" },
   hero: { ...StyleSheet.absoluteFillObject, height: "60%" },
+  langBar: {
+    position: "absolute",
+    right: spacing.lg,
+    zIndex: 10,
+  },
   scroll: { flexGrow: 1, justifyContent: "flex-end", padding: spacing.lg },
   topBrand: { alignItems: "center", marginBottom: spacing.xl },
   brandLogo: { width: 64, height: 64, borderRadius: radius.md, marginBottom: spacing.sm },

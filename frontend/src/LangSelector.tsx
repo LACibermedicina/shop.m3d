@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useI18n, LANGS, Lang } from "@/src/i18n";
-import { spacing, radius, font } from "@/src/theme";
+import { radius, font } from "@/src/theme";
 
 export function LangSelector({ variant = "light" }: { variant?: "light" | "dark" }) {
   const { lang, setLang } = useI18n();
@@ -20,10 +20,14 @@ export function LangSelector({ variant = "light" }: { variant?: "light" | "dark"
           <Pressable
             key={l.key}
             testID={`lang-${l.key}`}
+            accessibilityRole="button"
+            accessibilityLabel={`Idioma ${l.label}`}
+            accessibilityState={{ selected: active }}
             onPress={() => setLang(l.key as Lang)}
             style={[styles.pill, active && { backgroundColor: activeBg }]}
-            hitSlop={4}
+            hitSlop={6}
           >
+            <Text style={styles.flag}>{l.flag}</Text>
             <Text style={[styles.txt, { color: active ? activeText : idleText }]}>{l.label}</Text>
           </Pressable>
         );
@@ -41,11 +45,14 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   pill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    minWidth: 34,
+    flexDirection: "row",
     alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    minHeight: 30,
   },
+  flag: { fontSize: 15, lineHeight: 18 },
   txt: { fontSize: font.sm, fontWeight: "800", letterSpacing: 0.3 },
 });

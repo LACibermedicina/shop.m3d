@@ -268,6 +268,16 @@ test_plan:
   test_all: false
   test_priority: "high_first"
 
+frontend_feature_log:
+  - task: "Seletor de idioma por BANDEIRAS (PT-BR/EN/ES) + tradução IA na tela de login"
+    implemented: true
+    working: true
+    file: "frontend/src/LangSelector.tsx, frontend/src/i18n.tsx, frontend/app/login.tsx"
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "LangSelector agora exibe bandeira 🇧🇷/🇺🇸/🇪🇸 + rótulo; 'PT' renomeado para 'PT-BR'. Adicionado o seletor no topo da tela de login (safe-area) e todos os textos do login envolvidos em t() para tradução IA. Verificado via Playwright: PT-BR->EN traduz login inteiro ('Sign in', 'Username', placeholders, tagline, rodapé); PT-BR->ES idem ('Ingresar', 'Contraseña', etc). Endpoint /api/translate (Gemini) confirmado funcional."
+
 agent_communication:
     -agent: "main"
     -message: "NEW MARKETING MODULE. Please test the marketing endpoints (auth required, roles lojista/admin/master). Login via POST /api/auth/login. Use lojista/@0lojista and cliente/@0cliente. Tests: (1) GET /api/marketing/socials with lojista -> 200 returns {networks:[], catalog:[5 items with keys instagram_feed, instagram_story, tiktok, pinterest, facebook_feed]}. (2) PUT /api/marketing/socials {networks:[{network:'instagram_feed',handle:'@minhaloja',url:'https://instagram.com/minhaloja',enabled:true}]} -> 200; GET again reflects it. (3) POST /api/marketing/campaign {product_name:'Tenis Runner X', product_details:'leve, corrida, amortecimento', price:'R$ 299', category:'Calcados', networks:['instagram_feed'], language:'pt', tone:'esportivo'} -> 200 within ~40s. Verify response has id, concept, cover_path, assets[0] with image_path, caption, hashtags (list), cta, ratio '4:5', w 1080, h 1350. IMPORTANT this calls real AI image gen (Gemini nano banana) - use ONLY 1 network to limit cost/time. (4) GET /api/files/{assets[0].image_path} -> 200 image/jpeg. (5) GET /api/marketing/campaigns -> list contains the new campaign (with cover_path, WITHOUT assets). (6) GET /api/marketing/campaigns/{id} -> full with assets. (7) DELETE /api/marketing/campaigns/{id} -> ok; then GET detail -> 404. (8) Permission: cliente token on GET /api/marketing/socials -> 403, POST /api/marketing/campaign -> 403. (9) POST campaign with neither product_id nor product_name -> 400. Report any 500s. Credentials in /app/memory/test_credentials.md."

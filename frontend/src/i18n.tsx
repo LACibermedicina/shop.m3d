@@ -4,7 +4,7 @@ import { api } from "@/src/api";
 
 export type Lang = "pt" | "en" | "es";
 export const LANGS: { key: Lang; label: string; flag: string }[] = [
-  { key: "pt", label: "PT", flag: "🇧🇷" },
+  { key: "pt", label: "PT-BR", flag: "🇧🇷" },
   { key: "en", label: "EN", flag: "🇺🇸" },
   { key: "es", label: "ES", flag: "🇪🇸" },
 ];
