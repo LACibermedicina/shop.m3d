@@ -223,4 +223,9 @@ export const api = {
     const t = await loadToken();
     return `${BASE}/api/marketing/campaigns/${id}/kit.zip?token=${encodeURIComponent(t || "")}`;
   },
+
+  // WhatsApp config (master only)
+  waConfig: () => apiRequest("/master/whatsapp/config"),
+  waConfigUpdate: (b: any) => apiRequest("/master/whatsapp/config", { method: "PUT", body: b }),
+  waTest: (to: string) => apiRequest("/master/whatsapp/test", { method: "POST", body: { to } }),
 };

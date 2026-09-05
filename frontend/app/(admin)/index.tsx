@@ -219,6 +219,11 @@ export default function AdminStores() {
               <Ionicons name="grid" size={20} color="#fff" />
             </Pressable>
           )}
+          {isMaster && (
+            <Pressable testID="admin-whatsapp-button" onPress={() => router.push("/whatsapp-config")} style={styles.headerBadge}>
+              <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+            </Pressable>
+          )}
         </View>
       </LinearGradient>
 

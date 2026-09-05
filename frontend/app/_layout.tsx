@@ -52,6 +52,7 @@ export default function RootLayout() {
                   <Stack.Screen name="invite/[token]" options={{ presentation: "card" }} />
                   <Stack.Screen name="invites" options={{ presentation: "card" }} />
                   <Stack.Screen name="groups-admin" options={{ presentation: "card" }} />
+                  <Stack.Screen name="whatsapp-config" options={{ presentation: "card" }} />
                 </Stack>
               </ToastProvider>
             </I18nProvider>

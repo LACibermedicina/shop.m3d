@@ -46,6 +46,9 @@ WA_VERIFY_TOKEN = os.environ.get("WA_VERIFY_TOKEN", "").strip()
 META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
 WA_API_VERSION = os.environ.get("WA_API_VERSION", "v25.0").strip()
 WA_CONFIGURED = bool(WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID)
+# Send mode: "auto" tries the Cloud API (falling back to wa.me link on failure);
+# "link" skips the Cloud API entirely and always uses the manual wa.me deep-link.
+WA_SEND_MODE = os.environ.get("WA_SEND_MODE", "auto").strip().lower()
 # Utility templates (used for business-initiated notifications OUTSIDE the 24h window).
 # Leave empty until the templates are created & APPROVED on the WABA — when empty the
 # hybrid delivery skips the template step and falls back to a manual wa.me link.
@@ -269,6 +272,23 @@ class MasterUserIn(BaseModel):
     name: Optional[str] = ""
     role: str = "cliente"
     admin_id: Optional[str] = None
+
+
+class WAConfigIn(BaseModel):
+    access_token: Optional[str] = None
+    phone_number_id: Optional[str] = None
+    app_secret: Optional[str] = None
+    verify_token: Optional[str] = None
+    api_version: Optional[str] = None
+    template_lang: Optional[str] = None
+    template_order: Optional[str] = None
+    template_status: Optional[str] = None
+    send_mode: Optional[str] = None  # "auto" | "link"
+    root_whatsapp: Optional[str] = None
+
+
+class WATestIn(BaseModel):
+    to: Optional[str] = ""
 
 
 # ------------------------------------------------------------------ Auth helpers
@@ -1864,6 +1884,153 @@ async def wa_send_template(to: str, name: str, lang: str, body_params=None):
     return await wa_send({"to": _wa_norm(to), "type": "template", "template": template})
 
 
+# ---------------- WhatsApp runtime config (master-editable, DB-backed) ----------------
+def _mask_secret(v: str) -> str:
+    v = v or ""
+    if not v:
+        return ""
+    return f"••••••{v[-6:]}" if len(v) > 6 else "••••••"
+
+
+def _wa_config_public():
+    return {
+        "configured": WA_CONFIGURED,
+        "send_mode": WA_SEND_MODE,
+        "phone_number_id": WA_PHONE_NUMBER_ID,
+        "api_version": WA_API_VERSION,
+        "verify_token": WA_VERIFY_TOKEN,
+        "template_lang": WA_TEMPLATE_LANG,
+        "template_order": WA_TEMPLATE_ORDER,
+        "template_status": WA_TEMPLATE_STATUS,
+        "root_whatsapp": ROOT_WHATSAPP,
+        "access_token_masked": _mask_secret(WA_ACCESS_TOKEN),
+        "app_secret_masked": _mask_secret(META_APP_SECRET),
+        "has_access_token": bool(WA_ACCESS_TOKEN),
+        "has_app_secret": bool(META_APP_SECRET),
+        "webhook_url": (PUBLIC_BASE_URL.rstrip("/") + "/api/webhooks/whatsapp") if PUBLIC_BASE_URL
+                       else "/api/webhooks/whatsapp",
+    }
+
+
+def _apply_wa_config(cfg: dict):
+    """Apply overrides (from DB or a PUT payload) onto the in-memory globals."""
+    global WA_ACCESS_TOKEN, WA_PHONE_NUMBER_ID, WA_VERIFY_TOKEN, META_APP_SECRET
+    global WA_API_VERSION, WA_TEMPLATE_LANG, WA_TEMPLATE_ORDER, WA_TEMPLATE_STATUS
+    global WA_CONFIGURED, WA_SEND_MODE, ROOT_WHATSAPP
+    if cfg.get("access_token"):
+        WA_ACCESS_TOKEN = str(cfg["access_token"]).strip()
+    if cfg.get("app_secret"):
+        META_APP_SECRET = str(cfg["app_secret"]).strip()
+    if cfg.get("phone_number_id") is not None:
+        WA_PHONE_NUMBER_ID = str(cfg["phone_number_id"]).strip()
+    if cfg.get("verify_token") is not None:
+        WA_VERIFY_TOKEN = str(cfg["verify_token"]).strip()
+    if cfg.get("api_version"):
+        WA_API_VERSION = str(cfg["api_version"]).strip()
+    if cfg.get("template_lang"):
+        WA_TEMPLATE_LANG = str(cfg["template_lang"]).strip()
+    if cfg.get("template_order") is not None:
+        WA_TEMPLATE_ORDER = str(cfg["template_order"]).strip()
+    if cfg.get("template_status") is not None:
+        WA_TEMPLATE_STATUS = str(cfg["template_status"]).strip()
+    if cfg.get("send_mode") in ("auto", "link"):
+        WA_SEND_MODE = cfg["send_mode"]
+    if cfg.get("root_whatsapp") is not None:
+        ROOT_WHATSAPP = str(cfg["root_whatsapp"]).strip()
+    WA_CONFIGURED = bool(WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID)
+
+
+async def load_wa_overrides():
+    doc = await db.settings.find_one({"_id": "whatsapp"}, {"_id": 0})
+    if doc:
+        _apply_wa_config(doc)
+
+
+async def wa_phone_info():
+    """Live status of the phone number from the Graph API (never raises)."""
+    if not (WA_ACCESS_TOKEN and WA_PHONE_NUMBER_ID):
+        return {"ok": False, "error": "not_configured"}
+    url = f"https://graph.facebook.com/{WA_API_VERSION}/{WA_PHONE_NUMBER_ID}"
+    try:
+        async with httpx.AsyncClient(timeout=20) as hc:
+            r = await hc.get(url, params={
+                "fields": "display_phone_number,verified_name,platform_type,"
+                          "code_verification_status,quality_rating,account_mode",
+                "access_token": WA_ACCESS_TOKEN})
+        data = r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    err = (data.get("error") or {}) if isinstance(data, dict) else {}
+    return {"ok": r.status_code < 400, "status_code": r.status_code,
+            "error_code": err.get("code"), "error_message": err.get("message"), "data": data}
+
+
+async def wa_try_send_text(to: str, body: str):
+    """Attempt a direct free-form Cloud API send; capture (not raise) any error."""
+    url = f"https://graph.facebook.com/{WA_API_VERSION}/{WA_PHONE_NUMBER_ID}/messages"
+    try:
+        async with httpx.AsyncClient(timeout=20) as hc:
+            r = await hc.post(url, headers={"Authorization": f"Bearer {WA_ACCESS_TOKEN}"},
+                              json={"messaging_product": "whatsapp", "recipient_type": "individual",
+                                    "to": _wa_norm(to), "type": "text", "text": {"body": body}})
+        data = r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    err = (data.get("error") or {}) if isinstance(data, dict) else {}
+    return {"ok": r.status_code < 400, "status_code": r.status_code,
+            "error_code": err.get("code"), "error_message": err.get("message"), "data": data}
+
+
+@api.get("/master/whatsapp/config")
+async def master_wa_config(user=Depends(require_role("master"))):
+    info = await wa_phone_info()
+    return {"config": _wa_config_public(), "phone_info": info}
+
+
+@api.put("/master/whatsapp/config")
+async def master_wa_config_update(body: WAConfigIn, user=Depends(require_role("master"))):
+    if body.send_mode and body.send_mode not in ("auto", "link"):
+        raise HTTPException(status_code=400, detail="send_mode inválido (auto|link)")
+    updates = {}
+    for k in ("phone_number_id", "verify_token", "api_version", "template_lang",
+              "template_order", "template_status", "send_mode", "root_whatsapp"):
+        v = getattr(body, k)
+        if v is not None:
+            updates[k] = v.strip() if isinstance(v, str) else v
+    # secrets: only overwrite when a non-empty new value is supplied
+    if body.access_token:
+        updates["access_token"] = body.access_token.strip()
+    if body.app_secret:
+        updates["app_secret"] = body.app_secret.strip()
+    if updates:
+        await db.settings.update_one({"_id": "whatsapp"}, {"$set": updates}, upsert=True)
+        _apply_wa_config(updates)
+    info = await wa_phone_info()
+    return {"config": _wa_config_public(), "phone_info": info, "saved": list(updates.keys())}
+
+
+@api.post("/master/whatsapp/test")
+async def master_wa_test(body: WATestIn, user=Depends(require_role("master"))):
+    info = await wa_phone_info()
+    send = None
+    to = (body.to or "").strip()
+    if to:
+        send = await wa_try_send_text(to, "Teste de envio direto — shop.m3d.pro ✅")
+    direct_ok = bool(send and send.get("ok"))
+    hint = None
+    if send and not send.get("ok"):
+        if send.get("error_code") == 133010:
+            hint = ("Número ainda não registrado na Cloud API (#133010). Conclua a coexistência/"
+                    "onboarding no WhatsApp Manager para ativar os envios diretos. A entrega híbrida "
+                    "por link wa.me continua funcionando normalmente.")
+        else:
+            hint = send.get("error_message") or "Falha no envio direto."
+    elif direct_ok:
+        hint = "Envio direto pela Cloud API funcionando! ✅"
+    return {"config": _wa_config_public(), "phone_info": info,
+            "send": send, "direct_ok": direct_ok, "hint": hint}
+
+
 @api.post("/orders/send-whatsapp")
 async def send_order_whatsapp(body: SendWhatsApp, user=Depends(get_current_user)):
     if not WA_CONFIGURED:
@@ -3170,7 +3337,7 @@ async def _wa_or_sim(order_id, target, to, body, store_id="", template=None):
     if not to:
         return
     wa_link = _wa_me(to, body)
-    if WA_CONFIGURED:
+    if WA_CONFIGURED and WA_SEND_MODE != "link":
         # 1) free-form session message
         try:
             await wa_send({"to": _wa_norm(to), "type": "text", "text": {"body": body}})
@@ -3383,6 +3550,11 @@ async def startup():
         logger.info("system accounts seeded")
     except Exception as e:
         logger.warning(f"seed accounts failed: {e}")
+    try:
+        await load_wa_overrides()
+        logger.info("whatsapp overrides loaded")
+    except Exception as e:
+        logger.warning(f"whatsapp overrides load failed: {e}")
     try:
         asyncio.create_task(_marketing_scheduler_loop())
         logger.info("marketing scheduler started")

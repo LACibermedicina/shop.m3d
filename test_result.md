@@ -284,7 +284,31 @@ backend_feature_log:
         -agent: "testing"
         -comment: "PASSED: All 22 tests passed (100% success rate). Comprehensive WhatsApp hybrid delivery testing performed: (1) Master login successful ✓ (2) Store creation with WhatsApp number (5545999990001) ✓ (3) Product creation ✓ (4) Order creation with customer_whatsapp triggers notifications ✓ (5) GET /api/orders/{order_id}/notifications returns 3 notifications (lojista, admin, cliente) ✓ (6) All WhatsApp notifications have status='link' (NOT 'sent'/'template') as expected due to Cloud API #133010 error ✓ (7) All WhatsApp notifications have non-empty wa_link fields starting with 'https://wa.me/' ✓ (8) GET /api/orders/{order_id}/wa-links returns vendor_link and customer_link (both wa.me URLs) and pdf link ✓ (9) Regression: GET /api/whatsapp/status returns configured=true ✓ (10) Regression: GET /api/home, /api/stores, /api/groups all return 200 ✓ (11) Webhook verification: correct verify_token (shopm3d_wa_verify_2025_9f4c2a) returns challenge 'PING' ✓ (12) Webhook verification: wrong verify_token returns 403 ✓. The hybrid delivery fallback is working perfectly - when Cloud API send fails (error #133010 because number is in DISCONNECTED/ON_PREMISE state), the system correctly records status='link' with wa.me deep-link, ensuring no notification is lost. All WhatsApp hybrid delivery features working correctly."
 
+backend_wa_config_log:
+  - task: "WhatsApp master config: GET/PUT /master/whatsapp/config + POST /master/whatsapp/test + DB-backed runtime overrides + send_mode (auto|link)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "Added master-only endpoints. GET returns masked config + live Graph phone_info. PUT upserts to db.settings/_id=whatsapp and applies to in-memory globals (secrets only overwritten when non-empty). POST test re-checks phone info and optionally attempts a real send, mapping #133010 to a friendly hint. _wa_or_sim now respects WA_SEND_MODE (link => skip Cloud API). load_wa_overrides() runs on startup. Self-verified via curl: GET ok (configured:true, phone +55 11 92094-6954 ON_PREMISE/NOT_VERIFIED), test => direct_ok=false #133010 hint, PUT send_mode=link persisted in DB + reflected on GET, empty secrets do NOT overwrite token, invalid send_mode => 400, non-master => 403. Reverted send_mode to auto."
+
 frontend_feature_log:
+  - task: "Tela de Configuração do WhatsApp (master): status ao vivo, modo de envio, webhook (copiar), credenciais editáveis, validar/enviar teste"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/whatsapp-config.tsx, frontend/app/(admin)/index.tsx, frontend/src/api.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "New master-only screen at /whatsapp-config, opened via a logo-whatsapp button in the admin header (isMaster only). Shows live status (number, verified_name, platform_type, verification), a warning banner when direct sends are blocked (ON_PREMISE/#133010) and a success banner when Cloud-ready; send-mode chips (auto|link); webhook URL + verify token with copy; collapsible credentials (access_token/app_secret secure with masked current value, phone_number_id, verify_token, api_version, root_whatsapp, templates); Salvar; and a 'Validar/Enviar teste' block calling POST /master/whatsapp/test. Lint clean. Could NOT self-verify via screenshot tool (Playwright fill/type does not trigger RN-Web TextInput onChange in this harness), so login automation stalls — needs the frontend testing agent."
   - task: "Seletor de idioma por BANDEIRAS (PT-BR/EN/ES) + tradução IA na tela de login"
     implemented: true
     working: true
