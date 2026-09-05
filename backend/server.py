@@ -5,6 +5,7 @@ import json
 import uuid
 import base64
 import random
+import asyncio
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -1886,6 +1887,22 @@ class SocialsUpdate(BaseModel):
     networks: List[SocialNetworkIn] = []
 
 
+STYLE_PRESETS = {
+    "auto": {"label": "Automático", "icon": "sparkles-outline",
+             "hint": ""},
+    "minimalista": {"label": "Minimalista", "icon": "remove-outline",
+                    "hint": "clean minimalist aesthetic, generous negative space, soft neutral palette, calm studio lighting, refined and elegant"},
+    "luxo": {"label": "Luxo", "icon": "diamond-outline",
+             "hint": "luxurious premium aesthetic, sophisticated, deep dark tones with gold accents, dramatic cinematic lighting, high-end editorial fashion look"},
+    "vibrante": {"label": "Vibrante", "icon": "color-palette-outline",
+                 "hint": "vibrant bold saturated colors, energetic and playful, dynamic composition, pop-art inspired, high contrast"},
+    "natural": {"label": "Natural", "icon": "leaf-outline",
+                "hint": "natural organic lifestyle scene, warm golden-hour daylight, earthy tones, authentic real-world environment, soft depth of field"},
+    "tech": {"label": "Tecnológico", "icon": "hardware-chip-outline",
+             "hint": "modern high-tech aesthetic, sleek surfaces, cool blue neon accents, futuristic clean environment, crisp reflections"},
+}
+
+
 class CampaignReq(BaseModel):
     product_id: Optional[str] = None
     product_name: Optional[str] = None
@@ -1895,6 +1912,18 @@ class CampaignReq(BaseModel):
     networks: Optional[List[str]] = None
     language: Optional[str] = "pt"
     tone: Optional[str] = None
+    style: Optional[str] = "auto"
+
+
+class TrackReq(BaseModel):
+    network: str
+    action: str  # "save" | "copy" | "open"
+
+
+class ScheduleReq(BaseModel):
+    network: str
+    scheduled_at: str          # ISO datetime (UTC or with offset)
+    whatsapp: Optional[str] = ""
 
 
 class AssetTextUpdate(BaseModel):
@@ -1995,7 +2024,8 @@ async def _mkt_generate_image(prompt_en: str, ref_bytes: Optional[bytes] = None)
 async def marketing_get_socials(user=Depends(require_role("lojista", "admin"))):
     catalog = [{"key": k, "label": v["label"], "icon": v["icon"], "ratio": v["ratio"],
                 "w": v["w"], "h": v["h"]} for k, v in SUPPORTED_NETWORKS.items()]
-    return {"networks": user.get("social_networks") or [], "catalog": catalog}
+    styles = [{"key": k, "label": v["label"], "icon": v["icon"]} for k, v in STYLE_PRESETS.items()]
+    return {"networks": user.get("social_networks") or [], "catalog": catalog, "styles": styles}
 
 
 @api.put("/marketing/socials")
@@ -2040,6 +2070,12 @@ async def marketing_create_campaign(body: CampaignReq, user=Depends(require_role
     image_prompt = (data.get("image_prompt_en") or "").strip() or (
         f"High-end commercial lifestyle photograph of {product['name']} in an aspirational real-world setting, "
         "soft natural lighting, depth of field")
+    style = (body.style or "auto").strip().lower()
+    if style not in STYLE_PRESETS:
+        style = "auto"
+    style_hint = STYLE_PRESETS[style]["hint"]
+    if style_hint:
+        image_prompt = f"{image_prompt}. Visual style: {style_hint}."
 
     # 4) Imagem base por IA (usa a foto real do produto como referência, se houver)
     ref = None
@@ -2075,6 +2111,7 @@ async def marketing_create_campaign(body: CampaignReq, user=Depends(require_role
             "w": cfg["w"], "h": cfg["h"], "image_path": path, "image_prompt": image_prompt,
             "caption": nc.get("caption", ""), "hashtags": nc.get("hashtags") or [], "cta": nc.get("cta", ""),
             "profile_url": (hh.get("url") or hh.get("handle") or ""),
+            "stats": {"saves": 0, "copies": 0, "opens": 0},
         })
     if not assets:
         raise HTTPException(status_code=502, detail="Falha ao montar os formatos da campanha.")
@@ -2082,7 +2119,7 @@ async def marketing_create_campaign(body: CampaignReq, user=Depends(require_role
     doc = {"id": new_id("camp"), "owner_id": user["user_id"], "store_id": user.get("store_id"),
            "product_name": product["name"], "concept": data.get("concept_pt", ""),
            "image_prompt": image_prompt, "ref_image_path": product.get("image", ""),
-           "cover_path": assets[0]["image_path"],
+           "style": style, "cover_path": assets[0]["image_path"],
            "assets": assets, "created_at": now_iso()}
     await db.campaigns.insert_one(doc)
     doc.pop("_id", None)
@@ -2216,6 +2253,163 @@ async def marketing_suggest_copy(cid: str, body: SuggestReq,
         logger.warning(f"marketing suggest failed: {e}")
         raise HTTPException(status_code=502, detail="Falha ao gerar sugestão. Tente novamente.")
     return {"caption": data.get("caption", ""), "hashtags": data.get("hashtags") or [], "cta": data.get("cta", "")}
+
+
+@api.post("/marketing/campaigns/{cid}/asset/track")
+async def marketing_track_asset(cid: str, body: TrackReq,
+                                user=Depends(require_role("lojista", "admin"))):
+    action = (body.action or "").strip().lower()
+    field = {"save": "saves", "copy": "copies", "open": "opens"}.get(action)
+    if not field:
+        raise HTTPException(status_code=400, detail="Ação inválida")
+    _c, assets, asset = await _mkt_find_campaign_asset(cid, body.network, user)
+    stats = asset.get("stats") or {"saves": 0, "copies": 0, "opens": 0}
+    stats[field] = int(stats.get(field, 0)) + 1
+    asset["stats"] = stats
+    await db.campaigns.update_one({"id": cid}, {"$set": {"assets": assets}})
+    return asset
+
+
+@api.get("/marketing/campaigns/{cid}/kit.zip")
+async def marketing_campaign_kit(cid: str, token: str = Query(""),
+                                 authorization: Optional[str] = Header(None)):
+    tok = ""
+    if authorization and authorization.startswith("Bearer "):
+        tok = authorization.split(" ", 1)[1].strip()
+    elif token:
+        tok = token
+    user = None
+    if tok:
+        sess = await db.user_sessions.find_one({"session_token": tok}, {"_id": 0})
+        if sess:
+            user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
+    if not user or user.get("role") not in ("lojista", "admin", "master"):
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    c = await db.campaigns.find_one({"id": cid}, {"_id": 0})
+    if not c or (not is_master(user) and c.get("owner_id") != user["user_id"]):
+        raise HTTPException(status_code=404, detail="Campanha não encontrada")
+
+    import zipfile
+    buf = io.BytesIO()
+    txt_lines = [f"CAMPANHA: {c.get('product_name','')}", f"Conceito: {c.get('concept','')}", ""]
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for a in (c.get("assets") or []):
+            nk = a.get("network")
+            try:
+                content, _ct = await run_in_threadpool(get_object, a.get("image_path"))
+                zf.writestr(f"{nk}.jpg", content)
+            except Exception:
+                pass
+            tags = " ".join(a.get("hashtags") or [])
+            txt_lines += [
+                f"===== {a.get('label', nk)} ({a.get('ratio','')}) =====",
+                a.get("caption", ""), "", tags, "",
+                f"CTA: {a.get('cta','')}", "", "",
+            ]
+        zf.writestr("legendas.txt", "\n".join(txt_lines))
+    buf.seek(0)
+    fname = re.sub(r"[^a-zA-Z0-9]+", "-", c.get("product_name", "campanha")).strip("-").lower() or "campanha"
+    return StreamingResponse(io.BytesIO(buf.read()), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="kit-{fname}.zip"'})
+
+
+# --------------------------------------------------- Agendamento de publicações
+def _parse_dt(s: str):
+    try:
+        dt = datetime.fromisoformat((s or "").replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+@api.post("/marketing/campaigns/{cid}/schedule")
+async def marketing_schedule_post(cid: str, body: ScheduleReq,
+                                  user=Depends(require_role("lojista", "admin"))):
+    c, _assets, asset = await _mkt_find_campaign_asset(cid, body.network, user)
+    dt = _parse_dt(body.scheduled_at)
+    if not dt:
+        raise HTTPException(status_code=400, detail="Data/hora inválida")
+    if dt <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Escolha uma data/hora no futuro")
+    wa = (body.whatsapp or "").strip() or (user.get("whatsapp") or "").strip()
+    if not wa:
+        raise HTTPException(status_code=400, detail="Informe um número de WhatsApp para o lembrete")
+    doc = {
+        "id": new_id("sched"), "owner_id": user["user_id"], "campaign_id": cid,
+        "network": body.network, "network_label": SUPPORTED_NETWORKS[body.network]["label"],
+        "product_name": c.get("product_name", ""), "caption": asset.get("caption", ""),
+        "hashtags": asset.get("hashtags") or [], "image_path": asset.get("image_path", ""),
+        "target_whatsapp": wa, "scheduled_at": dt.isoformat(), "status": "pending",
+        "created_at": now_iso(), "sent_at": None, "error": "",
+    }
+    await db.scheduled_posts.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.get("/marketing/schedule")
+async def marketing_list_schedule(user=Depends(require_role("lojista", "admin"))):
+    q = {} if is_master(user) else {"owner_id": user["user_id"]}
+    items = await db.scheduled_posts.find(q, {"_id": 0}).sort("scheduled_at", 1).to_list(200)
+    return {"items": items, "whatsapp_configured": WA_CONFIGURED}
+
+
+@api.delete("/marketing/schedule/{sid}")
+async def marketing_cancel_schedule(sid: str, user=Depends(require_role("lojista", "admin"))):
+    sp = await db.scheduled_posts.find_one({"id": sid})
+    if not sp or (not is_master(user) and sp.get("owner_id") != user["user_id"]):
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+    await db.scheduled_posts.update_one({"id": sid}, {"$set": {"status": "cancelled"}})
+    return {"ok": True}
+
+
+async def _send_scheduled_post(sp: dict):
+    to = re.sub(r"\D", "", sp.get("target_whatsapp") or "")
+    if not to:
+        return False, "Número de WhatsApp ausente"
+    net_label = sp.get("network_label") or sp.get("network", "")
+    tags = " ".join(sp.get("hashtags") or [])
+    text = (f"⏰ *Hora de publicar!*\n\n"
+            f"Campanha: {sp.get('product_name', '')}\nRede: {net_label}\n\n"
+            f"{sp.get('caption', '')}\n\n{tags}").strip()
+    await wa_send({"to": to, "type": "text", "text": {"body": text}})
+    base = PUBLIC_BASE_URL.rstrip("/") if PUBLIC_BASE_URL else ""
+    if base and sp.get("image_path"):
+        try:
+            link = f"{base}/api/files/{sp['image_path']}"
+            await wa_send({"to": to, "type": "image",
+                           "image": {"link": link, "caption": f"Arte para {net_label}"}})
+        except Exception:
+            pass
+    return True, ""
+
+
+async def _marketing_scheduler_loop():
+    await asyncio.sleep(10)
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            due = await db.scheduled_posts.find({"status": "pending"}, {"_id": 0}).to_list(100)
+            for sp in due:
+                dt = _parse_dt(sp.get("scheduled_at", ""))
+                if not dt or dt > now:
+                    continue
+                if not WA_CONFIGURED:
+                    continue  # aguarda credenciais da WhatsApp API
+                try:
+                    ok, err = await _send_scheduled_post(sp)
+                    upd = {"status": "sent" if ok else "failed", "sent_at": now_iso()}
+                    if not ok:
+                        upd["error"] = err
+                    await db.scheduled_posts.update_one({"id": sp["id"]}, {"$set": upd})
+                except Exception as e:
+                    await db.scheduled_posts.update_one(
+                        {"id": sp["id"]}, {"$set": {"status": "failed", "error": str(e)[:300]}})
+        except Exception as e:
+            logger.warning(f"marketing scheduler loop error: {e}")
+        await asyncio.sleep(60)
 
 
 @api.get("/webhooks/whatsapp")
@@ -3136,6 +3330,11 @@ async def startup():
         logger.info("system accounts seeded")
     except Exception as e:
         logger.warning(f"seed accounts failed: {e}")
+    try:
+        asyncio.create_task(_marketing_scheduler_loop())
+        logger.info("marketing scheduler started")
+    except Exception as e:
+        logger.warning(f"scheduler start failed: {e}")
 
 
 @app.on_event("shutdown")

@@ -213,4 +213,14 @@ export const api = {
     apiRequest(`/marketing/campaigns/${id}/asset/regenerate`, { method: "POST", body: { network, distinct, prompt } }),
   suggestCampaignCopy: (id: string, network: string, language = "pt") =>
     apiRequest(`/marketing/campaigns/${id}/suggest`, { method: "POST", body: { network, language } }),
+  trackCampaignAsset: (id: string, network: string, action: "save" | "copy" | "open") =>
+    apiRequest(`/marketing/campaigns/${id}/asset/track`, { method: "POST", body: { network, action } }),
+  scheduleCampaignPost: (id: string, network: string, scheduledAt: string, whatsapp: string) =>
+    apiRequest(`/marketing/campaigns/${id}/schedule`, { method: "POST", body: { network, scheduled_at: scheduledAt, whatsapp } }),
+  scheduleList: () => apiRequest("/marketing/schedule"),
+  cancelSchedule: (sid: string) => apiRequest(`/marketing/schedule/${sid}`, { method: "DELETE" }),
+  campaignKitUrl: async (id: string) => {
+    const t = await loadToken();
+    return `${BASE}/api/marketing/campaigns/${id}/kit.zip?token=${encodeURIComponent(t || "")}`;
+  },
 };

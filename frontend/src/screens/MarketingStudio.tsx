@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Linking,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -30,6 +31,7 @@ type NetState = Record<string, { enabled: boolean; handle: string; url: string }
 type Asset = {
   network: string; label: string; icon: string; ratio: string; w: number; h: number;
   image_path: string; caption: string; hashtags: string[]; cta: string; profile_url?: string;
+  stats?: { saves: number; copies: number; opens: number };
 };
 type Campaign = {
   id: string; product_name: string; concept: string; cover_path?: string;
@@ -50,9 +52,10 @@ type AssetEditorProps = {
   onCopy: (txt: string, label?: string) => void;
   onShare: (a: Asset) => void;
   onOpenProfile: (a: Asset) => void;
+  onSchedule: (a: Asset) => void;
 };
 
-function AssetEditor({ campaignId, asset, language, onUpdated, onCopy, onShare, onOpenProfile }: AssetEditorProps) {
+function AssetEditor({ campaignId, asset, language, onUpdated, onCopy, onShare, onOpenProfile, onSchedule }: AssetEditorProps) {
   const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [caption, setCaption] = useState(asset.caption || "");
@@ -116,6 +119,14 @@ function AssetEditor({ campaignId, asset, language, onUpdated, onCopy, onShare, 
   };
 
   const busyImg = regen !== "";
+
+  const track = (action: "save" | "copy" | "open") => {
+    api.trackCampaignAsset(campaignId, asset.network, action).then(onUpdated).catch(() => {});
+  };
+  const handleShare = () => { track("save"); onShare(asset); };
+  const handleCopyAll = () => { track("copy"); onCopy(`${asset.caption}\n\n${(asset.hashtags || []).join(" ")}`, "Texto copiado"); };
+  const handleOpen = () => { track("open"); onOpenProfile(asset); };
+  const st = asset.stats || { saves: 0, copies: 0, opens: 0 };
 
   return (
     <View style={styles.assetCard}>
@@ -194,18 +205,42 @@ function AssetEditor({ campaignId, asset, language, onUpdated, onCopy, onShare, 
               <Text style={styles.ctaText}>{asset.cta}</Text>
             </View>
           )}
+          <View style={styles.statsRow}>
+            <View style={styles.statBadge}>
+              <Ionicons name="download-outline" size={13} color={colors.brandPrimary} />
+              <Text style={styles.statText}>{st.saves} salvas</Text>
+            </View>
+            <View style={styles.statBadge}>
+              <Ionicons name="copy-outline" size={13} color={colors.brandPrimary} />
+              <Text style={styles.statText}>{st.copies} cópias</Text>
+            </View>
+            <View style={styles.statBadge}>
+              <Ionicons name="open-outline" size={13} color={colors.brandPrimary} />
+              <Text style={styles.statText}>{st.opens} aberturas</Text>
+            </View>
+          </View>
           <View style={styles.assetActions}>
             <Pressable testID={`edit-asset-${asset.network}`} style={styles.actBtn} onPress={startEdit}>
               <Ionicons name="create-outline" size={16} color={colors.onSurface} />
               <Text style={styles.actText}>Editar</Text>
             </Pressable>
-            <Pressable style={[styles.actBtn, styles.actPrimary]} onPress={() => onShare(asset)}>
-              <Ionicons name="download-outline" size={16} color="#fff" />
-              <Text style={[styles.actText, { color: "#fff" }]}>Salvar/Publicar</Text>
+            <Pressable testID={`copy-asset-${asset.network}`} style={styles.actBtn} onPress={handleCopyAll}>
+              <Ionicons name="copy-outline" size={16} color={colors.onSurface} />
+              <Text style={styles.actText}>Copiar</Text>
             </Pressable>
-            <Pressable style={styles.actBtn} onPress={() => onOpenProfile(asset)}>
+            <Pressable testID={`share-asset-${asset.network}`} style={[styles.actBtn, styles.actPrimary]} onPress={handleShare}>
+              <Ionicons name="download-outline" size={16} color="#fff" />
+              <Text style={[styles.actText, { color: "#fff" }]}>Salvar</Text>
+            </Pressable>
+          </View>
+          <View style={styles.assetActions}>
+            <Pressable testID={`schedule-asset-${asset.network}`} style={styles.actBtn} onPress={() => onSchedule(asset)}>
+              <Ionicons name="calendar-outline" size={16} color={colors.onSurface} />
+              <Text style={styles.actText}>Agendar</Text>
+            </Pressable>
+            <Pressable style={styles.actBtn} onPress={handleOpen}>
               <Ionicons name="open-outline" size={16} color={colors.onSurface} />
-              <Text style={styles.actText}>Abrir</Text>
+              <Text style={styles.actText}>Abrir rede</Text>
             </Pressable>
           </View>
         </>
@@ -220,7 +255,7 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
   const router = useRouter();
   const { user } = useAuth();
 
-  const [view, setView] = useState<"novo" | "campanhas" | "redes">("novo");
+  const [view, setView] = useState<"novo" | "campanhas" | "redes" | "agenda">("novo");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -243,11 +278,29 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [detail, setDetail] = useState<Campaign | null>(null);
 
+  const [styles2, setStyles2] = useState<{ key: string; label: string; icon: string }[]>([]);
+  const [style, setStyle] = useState("auto");
+  const [schedule, setSchedule] = useState<any[]>([]);
+  const [waConfigured, setWaConfigured] = useState(true);
+  const [downloadingKit, setDownloadingKit] = useState(false);
+
+  // agendamento
+  const [schedAsset, setSchedAsset] = useState<Asset | null>(null);
+  const [schedDate, setSchedDate] = useState("");
+  const [schedTime, setSchedTime] = useState("");
+  const [schedWhats, setSchedWhats] = useState("");
+  const [schedBusy, setSchedBusy] = useState(false);
+
   const loadAll = useCallback(async () => {
     try {
-      const [soc, camps] = await Promise.all([api.marketingSocials(), api.campaigns()]);
+      const [soc, camps, sch] = await Promise.all([
+        api.marketingSocials(),
+        api.campaigns(),
+        api.scheduleList().catch(() => ({ items: [], whatsapp_configured: true })),
+      ]);
       const cat: Catalog[] = soc.catalog || [];
       setCatalog(cat);
+      setStyles2(soc.styles || []);
       const ns: NetState = {};
       cat.forEach((c) => {
         const found = (soc.networks || []).find((n: any) => n.network === c.key);
@@ -261,6 +314,8 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
       const enabled = cat.filter((c) => ns[c.key]?.enabled).map((c) => c.key);
       setSelectedNetworks(enabled.length ? enabled : cat.map((c) => c.key));
       setCampaigns(camps || []);
+      setSchedule(sch.items || []);
+      setWaConfigured(!!sch.whatsapp_configured);
     } catch (e: any) {
       toast(e.message || "Erro ao carregar", "error");
     } finally {
@@ -313,7 +368,7 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
       toast("Selecione ao menos uma rede", "info");
       return;
     }
-    const body: any = { networks: selectedNetworks, language, tone: tone.trim() };
+    const body: any = { networks: selectedNetworks, language, tone: tone.trim(), style };
     if (source === "produto") {
       if (!selectedProduct) {
         toast("Selecione um produto", "info");
@@ -370,6 +425,79 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
       return { ...prev, assets, cover_path: cover };
     });
   }, []);
+
+  const downloadKit = async () => {
+    if (!detail) return;
+    setDownloadingKit(true);
+    try {
+      const url = await api.campaignKitUrl(detail.id);
+      if (Platform.OS === "web") {
+        await Linking.openURL(url);
+      } else {
+        const dest = `${FileSystem.cacheDirectory}kit_${detail.id}.zip`;
+        const dl = await FileSystem.downloadAsync(url, dest);
+        const available = await Sharing.isAvailableAsync();
+        if (available) await Sharing.shareAsync(dl.uri, { mimeType: "application/zip", dialogTitle: "Kit de publicação" });
+        else toast("Compartilhamento indisponível", "error");
+      }
+      toast("Kit gerado!", "success");
+    } catch {
+      toast("Falha ao gerar o kit", "error");
+    } finally {
+      setDownloadingKit(false);
+    }
+  };
+
+  const openSchedule = (a: Asset) => {
+    const d = new Date(Date.now() + 60 * 60 * 1000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    setSchedDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    setSchedTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    setSchedWhats(user?.whatsapp || "");
+    setSchedAsset(a);
+  };
+
+  const applyPreset = (preset: "1h" | "tonight" | "tomorrow9" | "tomorrow18") => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    let d = new Date();
+    if (preset === "1h") d = new Date(Date.now() + 60 * 60 * 1000);
+    else if (preset === "tonight") { d.setHours(18, 0, 0, 0); if (d.getTime() < Date.now()) d = new Date(Date.now() + 60 * 60 * 1000); }
+    else if (preset === "tomorrow9") { d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); }
+    else if (preset === "tomorrow18") { d.setDate(d.getDate() + 1); d.setHours(18, 0, 0, 0); }
+    setSchedDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    setSchedTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  };
+
+  const confirmSchedule = async () => {
+    if (!detail || !schedAsset) return;
+    if (!schedWhats.trim()) { toast("Informe o WhatsApp para o lembrete", "info"); return; }
+    const iso = new Date(`${schedDate}T${schedTime}:00`);
+    if (isNaN(iso.getTime())) { toast("Data/hora inválida", "error"); return; }
+    if (iso.getTime() <= Date.now()) { toast("Escolha uma data/hora futura", "info"); return; }
+    setSchedBusy(true);
+    try {
+      await api.scheduleCampaignPost(detail.id, schedAsset.network, iso.toISOString(), schedWhats.trim());
+      toast("Publicação agendada!", "success");
+      setSchedAsset(null);
+      const sch = await api.scheduleList().catch(() => ({ items: [], whatsapp_configured: true }));
+      setSchedule(sch.items || []);
+      setWaConfigured(!!sch.whatsapp_configured);
+    } catch (e: any) {
+      toast(e.message || "Falha ao agendar", "error");
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
+  const cancelSchedule = async (sid: string) => {
+    try {
+      await api.cancelSchedule(sid);
+      setSchedule((prev) => prev.map((s) => (s.id === sid ? { ...s, status: "cancelled" } : s)));
+      toast("Agendamento cancelado", "success");
+    } catch (e: any) {
+      toast(e.message || "Erro", "error");
+    }
+  };
 
   const copyText = async (txt: string, label = "Copiado") => {
     try {
@@ -439,7 +567,8 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
         {([
           ["novo", "Nova", "add-circle-outline"],
           ["campanhas", "Campanhas", "images-outline"],
-          ["redes", "Minhas redes", "share-social-outline"],
+          ["agenda", "Agenda", "calendar-outline"],
+          ["redes", "Redes", "share-social-outline"],
         ] as const).map(([k, lbl, ic]) => (
           <Pressable key={k} onPress={() => setView(k)}
             style={[styles.segItem, view === k && styles.segItemActive]}>
@@ -464,6 +593,9 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
               <Text style={styles.headerTitle} numberOfLines={1}>{detail.product_name}</Text>
               <Text style={styles.headerSub}>{(detail.assets || []).length} formato(s) gerado(s)</Text>
             </View>
+            <Pressable testID="download-kit-btn" onPress={downloadKit} hitSlop={10} style={styles.headerIcon}>
+              {downloadingKit ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="cloud-download-outline" size={20} color="#fff" />}
+            </Pressable>
           </View>
         </LinearGradient>
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 100 }}>
@@ -473,6 +605,10 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
               <Text style={styles.conceptText}>{detail.concept}</Text>
             </View>
           )}
+          <Pressable testID="kit-button" style={styles.kitBtn} onPress={downloadKit} disabled={downloadingKit}>
+            {downloadingKit ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="cloud-download-outline" size={18} color="#fff" />}
+            <Text style={styles.kitBtnText}>Baixar kit de publicação (todos os formatos)</Text>
+          </Pressable>
           {(detail.assets || []).map((a) => (
             <AssetEditor
               key={a.network}
@@ -483,6 +619,7 @@ export default function MarketingStudio({ showBack = false }: { showBack?: boole
               onCopy={copyText}
               onShare={shareAsset}
               onOpenProfile={openProfile}
+              onSchedule={openSchedule}
             />
           ))}
         </ScrollView>
