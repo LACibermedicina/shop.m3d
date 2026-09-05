@@ -8,7 +8,7 @@ import sys
 import time
 
 # Backend base URL from frontend/.env
-BASE_URL = "https://98710137-4fd0-48f9-a67d-5c9ad5ac69d2.preview.emergentagent.com/api"
+BASE_URL = "https://git-sync-40.preview.emergentagent.com/api"
 
 # Test credentials from /app/memory/test_credentials.md
 CREDENTIALS = {
