@@ -121,6 +121,8 @@ setup_notes:
 agent_communication:
     -agent: "main"
     -message: "Project imported and configured for preview. Services running, preview live. No new features added per user request scope (configure + preview only)."
+    -agent: "main"
+    -message: "WHATSAPP CONFIG (2026-09): Filled WA_ACCESS_TOKEN, WA_PHONE_NUMBER_ID=1329447850249783, META_APP_SECRET, WA_API_VERSION=v25.0, and set WA_VERIFY_TOKEN=shopm3d_wa_verify_2025_9f4c2a in backend/.env. Validated: (a) token+phone id read OK via Graph API (display +55 11 92094-6954, verified_name M3D.pro); (b) /api/whatsapp/status -> configured:true; (c) webhook GET verify returns challenge on correct token, 403 on wrong. BLOCKER for actual sends: Graph API returns #133010 'Account not registered' -> the phone number must be REGISTERED on Cloud API (POST /{PID}/register with the 6-digit two-step verification PIN). Waiting on PIN from user. Webhook URL for Meta: {PUBLIC_BASE_URL}/api/webhooks/whatsapp."
 
 backend:
   - task: "Role hierarchy: master/admin/lojista/cliente + master auto-promotion by email"
